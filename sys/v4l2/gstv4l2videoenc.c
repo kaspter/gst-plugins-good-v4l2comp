@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014 Collabora Ltd.
- *     Author: Nicolas Dufresne <nicolas.dufresne@collabora.co.uk>
+ * Copyright (C) 2014 SUMOMO Computer Association
+ *     Author: ayaka <ayaka@soulik.info>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -29,52 +29,56 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "gstv4l2videodec.h"
+#include "gstv4l2videoenc.h"
 #include "v4l2_calls.h"
 
 #include <string.h>
 #include <gst/gst-i18n-plugin.h>
 
-GST_DEBUG_CATEGORY_STATIC (gst_v4l2_video_dec_debug);
-#define GST_CAT_DEFAULT gst_v4l2_video_dec_debug
+GST_DEBUG_CATEGORY_STATIC (gst_v4l2_video_enc_debug);
+#define GST_CAT_DEFAULT gst_v4l2_video_enc_debug
 
-static gboolean gst_v4l2_video_dec_flush (GstVideoDecoder * decoder);
+#define MAX_CODEC_FRAME (2 * 1024 * 1024)
 
-typedef struct
-{
-  gchar *device;
-  GstCaps *sink_caps;
-  GstCaps *src_caps;
-} GstV4l2VideoCData;
+static gboolean gst_v4l2_video_enc_flush (GstVideoEncoder * encoder);
 
 enum
 {
   PROP_0,
-  V4L2_STD_OBJECT_PROPS
+  V4L2_STD_OBJECT_PROPS,
 };
 
-#define gst_v4l2_video_dec_parent_class parent_class
-G_DEFINE_ABSTRACT_TYPE (GstV4l2VideoDec, gst_v4l2_video_dec,
-    GST_TYPE_VIDEO_DECODER);
+#define gst_v4l2_video_enc_parent_class parent_class
+G_DEFINE_ABSTRACT_TYPE (GstV4l2VideoEnc, gst_v4l2_video_enc,
+    GST_TYPE_VIDEO_ENCODER);
 
 static void
-gst_v4l2_video_dec_set_property (GObject * object,
+gst_v4l2_video_enc_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (object);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (object);
 
   switch (prop_id) {
-    case PROP_OUTPUT_IO_MODE:
-      gst_v4l2_object_set_property_helper (self->v4l2output, prop_id, value,
-          pspec);
+      /* Split IO mode so output is configure through 'io-mode' and capture
+       * through 'capture-io-mode' */
+    case PROP_IO_MODE:
+      gst_v4l2_object_set_property_helper (self->v4l2output,
+          PROP_IO_MODE, value, pspec);
       break;
     case PROP_CAPTURE_IO_MODE:
-      gst_v4l2_object_set_property_helper (self->v4l2capture, prop_id, value,
-          pspec);
+      gst_v4l2_object_set_property_helper (self->v4l2capture,
+          prop_id, value, pspec);
+      break;
+
+    case PROP_DEVICE:
+      gst_v4l2_object_set_property_helper (self->v4l2output,
+          prop_id, value, pspec);
+      gst_v4l2_object_set_property_helper (self->v4l2capture,
+          prop_id, value, pspec);
       break;
     case PROP_EXTRA_CONTROLS:
-      gst_v4l2_object_set_property_helper (self->v4l2output, prop_id, value,
-          pspec);
+      gst_v4l2_object_set_property_helper (self->v4l2output,
+          prop_id, value, pspec);
       break;
 
       /* By default, only set on output */
@@ -88,25 +92,25 @@ gst_v4l2_video_dec_set_property (GObject * object,
 }
 
 static void
-gst_v4l2_video_dec_get_property (GObject * object,
+gst_v4l2_video_enc_get_property (GObject * object,
     guint prop_id, GValue * value, GParamSpec * pspec)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (object);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (object);
 
   switch (prop_id) {
     case PROP_IO_MODE:
-      gst_v4l2_object_get_property_helper (self->v4l2output, prop_id, value,
-          pspec);
+      gst_v4l2_object_get_property_helper (self->v4l2output,
+          prop_id, value, pspec);
       break;
     case PROP_CAPTURE_IO_MODE:
-      gst_v4l2_object_get_property_helper (self->v4l2output, PROP_IO_MODE,
-          value, pspec);
-      break;
-    case PROP_EXTRA_CONTROLS:
-      gst_v4l2_object_get_property_helper (self->v4l2output, prop_id, value,
-          pspec);
+      gst_v4l2_object_get_property_helper (self->v4l2output,
+          PROP_IO_MODE, value, pspec);
       break;
 
+    case PROP_EXTRA_CONTROLS:
+      gst_v4l2_object_get_property_helper (self->v4l2output,
+          prop_id, value, pspec);
+      break;
       /* By default read from output */
     default:
       if (!gst_v4l2_object_get_property_helper (self->v4l2output,
@@ -118,9 +122,9 @@ gst_v4l2_video_dec_get_property (GObject * object,
 }
 
 static gboolean
-gst_v4l2_video_dec_open (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_open (GstVideoEncoder * encoder)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
 
   GST_DEBUG_OBJECT (self, "Opening");
 
@@ -131,29 +135,29 @@ gst_v4l2_video_dec_open (GstVideoDecoder * decoder)
     goto failure;
 
   self->probed_sinkcaps = gst_v4l2_object_get_caps (self->v4l2output,
-      gst_v4l2_object_get_codec_caps ());
-
-  if (gst_caps_is_empty (self->probed_sinkcaps))
-    goto no_encoded_format;
-
-  self->probed_srccaps = gst_v4l2_object_get_caps (self->v4l2capture,
       gst_v4l2_object_get_raw_caps ());
 
-  if (gst_caps_is_empty (self->probed_srccaps))
+  if (gst_caps_is_empty (self->probed_sinkcaps))
     goto no_raw_format;
+
+  self->probed_srccaps = gst_v4l2_object_get_caps (self->v4l2capture,
+      gst_v4l2_object_get_codec_caps ());
+
+  if (gst_caps_is_empty (self->probed_srccaps))
+    goto no_encoded_format;
 
   return TRUE;
 
 no_encoded_format:
   GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
-      (_("Encoder on device %s has no supported input format"),
+      (_("Encoder on device %s has no supported output format"),
           self->v4l2output->videodev), (NULL));
   goto failure;
 
 
 no_raw_format:
   GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
-      (_("Encoder on device %s has no supported output format"),
+      (_("Encoder on device %s has no supported input format"),
           self->v4l2output->videodev), (NULL));
   goto failure;
 
@@ -171,9 +175,9 @@ failure:
 }
 
 static gboolean
-gst_v4l2_video_dec_close (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_close (GstVideoEncoder * encoder)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
 
   GST_DEBUG_OBJECT (self, "Closing");
 
@@ -186,9 +190,9 @@ gst_v4l2_video_dec_close (GstVideoDecoder * decoder)
 }
 
 static gboolean
-gst_v4l2_video_dec_start (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_start (GstVideoEncoder * encoder)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
 
   GST_DEBUG_OBJECT (self, "Starting");
 
@@ -200,9 +204,9 @@ gst_v4l2_video_dec_start (GstVideoDecoder * decoder)
 }
 
 static gboolean
-gst_v4l2_video_dec_stop (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_stop (GstVideoEncoder * encoder)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
 
   GST_DEBUG_OBJECT (self, "Stopping");
 
@@ -210,11 +214,11 @@ gst_v4l2_video_dec_stop (GstVideoDecoder * decoder)
   gst_v4l2_object_unlock (self->v4l2capture);
 
   /* Wait for capture thread to stop */
-  gst_pad_stop_task (decoder->srcpad);
+  gst_pad_stop_task (encoder->srcpad);
 
-  GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+  GST_VIDEO_ENCODER_STREAM_LOCK (encoder);
   self->output_flow = GST_FLOW_OK;
-  GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+  GST_VIDEO_ENCODER_STREAM_UNLOCK (encoder);
 
   /* Should have been flushed already */
   g_assert (g_atomic_int_get (&self->active) == FALSE);
@@ -234,11 +238,12 @@ gst_v4l2_video_dec_stop (GstVideoDecoder * decoder)
 }
 
 static gboolean
-gst_v4l2_video_dec_set_format (GstVideoDecoder * decoder,
+gst_v4l2_video_enc_set_format (GstVideoEncoder * encoder,
     GstVideoCodecState * state)
 {
   gboolean ret = TRUE;
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
+  GstStructure *structure;
 
   GST_DEBUG_OBJECT (self, "Setting format: %" GST_PTR_FORMAT, state->caps);
 
@@ -258,26 +263,30 @@ gst_v4l2_video_dec_set_format (GstVideoDecoder * decoder,
   if (ret)
     self->input_state = gst_video_codec_state_ref (state);
 
+  GST_DEBUG_OBJECT (self, "output caps: %" GST_PTR_FORMAT, state->caps);
+
 done:
   return ret;
 }
 
 static gboolean
-gst_v4l2_video_dec_flush (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_flush (GstVideoEncoder * encoder)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
 
-  GST_DEBUG_OBJECT (self, "Flushed");
+  GST_DEBUG_OBJECT (self, "Flushing");
 
   /* Ensure the processing thread has stopped for the reverse playback
-   * discount case */
+   * iscount case */
   if (g_atomic_int_get (&self->processing)) {
-    GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+    GST_VIDEO_ENCODER_STREAM_UNLOCK (encoder);
 
-    gst_v4l2_object_unlock (self->v4l2output);
-    gst_v4l2_object_unlock (self->v4l2capture);
-    gst_pad_stop_task (decoder->srcpad);
-    GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+    gst_v4l2_object_unlock_stop (self->v4l2output);
+    gst_v4l2_object_unlock_stop (self->v4l2capture);
+    gst_pad_stop_task (encoder->srcpad);
+
+    GST_VIDEO_ENCODER_STREAM_UNLOCK (encoder);
+
   }
 
   self->output_flow = GST_FLOW_OK;
@@ -289,64 +298,57 @@ gst_v4l2_video_dec_flush (GstVideoDecoder * decoder)
 }
 
 static gboolean
-gst_v4l2_video_dec_negotiate (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_negotiate (GstVideoEncoder * encoder)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
-
-  /* We don't allow renegotiation without carefull disabling the pool */
-  if (self->v4l2capture->pool &&
-      gst_buffer_pool_is_active (GST_BUFFER_POOL (self->v4l2capture->pool)))
-    return TRUE;
-
-  return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
+  return GST_VIDEO_ENCODER_CLASS (parent_class)->negotiate (encoder);
 }
 
 static GstFlowReturn
-gst_v4l2_video_dec_finish (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_finish (GstVideoEncoder * encoder)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
   GstFlowReturn ret = GST_FLOW_OK;
   GstBuffer *buffer;
 
   if (!g_atomic_int_get (&self->processing))
     goto done;
 
-  GST_DEBUG_OBJECT (self, "Finishing decoding");
+  GST_DEBUG_OBJECT (self, "Finishing encoding");
 
   /* Keep queuing empty buffers until the processing thread has stopped,
    * _pool_process() will return FLUSHING when that happened */
-  GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+  GST_VIDEO_ENCODER_STREAM_UNLOCK (encoder);
   while (ret == GST_FLOW_OK) {
     buffer = gst_buffer_new ();
     ret =
-        gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (self->
-            v4l2output->pool), &buffer);
+        gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL
+        (self->v4l2output->pool), &buffer);
     gst_buffer_unref (buffer);
   }
 
   /* and ensure the processing thread has stopped in case another error
    * occured. */
   gst_v4l2_object_unlock (self->v4l2capture);
-  gst_pad_stop_task (decoder->srcpad);
-  GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+  gst_pad_stop_task (encoder->srcpad);
+  GST_VIDEO_ENCODER_STREAM_LOCK (encoder);
 
   if (ret == GST_FLOW_FLUSHING)
     ret = self->output_flow;
 
-  GST_DEBUG_OBJECT (decoder, "Done draining buffers");
+  GST_DEBUG_OBJECT (encoder, "Done draining buffers");
 
 done:
   return ret;
 }
 
 static GstVideoCodecFrame *
-gst_v4l2_video_dec_get_oldest_frame (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_get_oldest_frame (GstVideoEncoder * encoder)
 {
   GstVideoCodecFrame *frame = NULL;
   GList *frames, *l;
   gint count = 0;
 
-  frames = gst_video_decoder_get_frames (decoder);
+  frames = gst_video_encoder_get_frames (encoder);
 
   for (l = frames; l != NULL; l = l->next) {
     GstVideoCodecFrame *f = l->data;
@@ -358,8 +360,9 @@ gst_v4l2_video_dec_get_oldest_frame (GstVideoDecoder * decoder)
   }
 
   if (frame) {
-    GST_LOG_OBJECT (decoder,
-        "Oldest frame is %d %" GST_TIME_FORMAT " and %d frames left",
+    GST_LOG_OBJECT (encoder,
+        "Oldest frame is %d %" GST_TIME_FORMAT
+        " and %d frames left",
         frame->system_frame_number, GST_TIME_ARGS (frame->pts), count - 1);
     gst_video_codec_frame_ref (frame);
   }
@@ -370,91 +373,80 @@ gst_v4l2_video_dec_get_oldest_frame (GstVideoDecoder * decoder)
 }
 
 static void
-gst_v4l2_video_dec_loop (GstVideoDecoder * decoder)
+gst_v4l2_video_enc_loop (GstVideoEncoder * encoder)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
-  GstV4l2BufferPool *v4l2_pool = GST_V4L2_BUFFER_POOL (self->v4l2capture->pool);
-  GstBufferPool *pool;
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
   GstVideoCodecFrame *frame;
   GstBuffer *buffer = NULL;
   GstFlowReturn ret;
 
-  GST_LOG_OBJECT (decoder, "Allocate output buffer");
+  GST_LOG_OBJECT (encoder, "Allocate output buffer");
 
-  do {
-    /* We cannot use the base class allotate helper since it taking the internal
-     * stream lock. we know that the acquire may need to poll until more frames
-     * comes in and holding this lock would prevent that.
-     */
-    pool = gst_video_decoder_get_buffer_pool (decoder);
+  buffer = gst_video_encoder_allocate_output_buffer (encoder, MAX_CODEC_FRAME);
 
-    /* Pool may be NULL if we started going to READY state */
-    if (pool == NULL) {
-      ret = GST_FLOW_FLUSHING;
-      goto beach;
-    }
+  if (NULL == buffer) {
+    ret = GST_FLOW_FLUSHING;
+    goto beach;
+  }
 
-    ret = gst_buffer_pool_acquire_buffer (pool, &buffer, NULL);
-    g_object_unref (pool);
 
-    if (ret != GST_FLOW_OK)
-      goto beach;
+  /* FIXME Check if buffer isn't the last one here */
 
-    GST_LOG_OBJECT (decoder, "Process output buffer");
-    ret = gst_v4l2_buffer_pool_process (v4l2_pool, &buffer);
-
-  } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
+  GST_LOG_OBJECT (encoder, "Process output buffer");
+  ret =
+      gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL
+      (self->v4l2capture->pool), &buffer);
 
   if (ret != GST_FLOW_OK)
     goto beach;
 
-  frame = gst_v4l2_video_dec_get_oldest_frame (decoder);
+  frame = gst_v4l2_video_enc_get_oldest_frame (encoder);
 
   if (frame) {
     frame->output_buffer = buffer;
     buffer = NULL;
-    ret = gst_video_decoder_finish_frame (decoder, frame);
+    ret = gst_video_encoder_finish_frame (encoder, frame);
 
     if (ret != GST_FLOW_OK)
       goto beach;
   } else {
-    GST_WARNING_OBJECT (decoder, "Decoder is producing too many buffers");
+    GST_WARNING_OBJECT (encoder, "Encoder is producing too many buffers");
     gst_buffer_unref (buffer);
   }
 
   return;
 
 beach:
-  GST_DEBUG_OBJECT (decoder, "Leaving output thread: %s",
-      gst_flow_get_name (ret));
+  GST_DEBUG_OBJECT (encoder, "Leaving output thread");
 
   gst_buffer_replace (&buffer, NULL);
   self->output_flow = ret;
   g_atomic_int_set (&self->processing, FALSE);
   gst_v4l2_object_unlock (self->v4l2output);
-  gst_pad_pause_task (decoder->srcpad);
+  gst_pad_pause_task (encoder->srcpad);
 }
 
 static void
-gst_v4l2_video_dec_loop_stopped (GstV4l2VideoDec * self)
+gst_v4l2_video_enc_loop_stopped (GstV4l2VideoEnc * self)
 {
-  /* When flushing, decoding thread may never run */
   if (g_atomic_int_get (&self->processing)) {
-    GST_DEBUG_OBJECT (self, "Early stop of decoding thread");
+    GST_DEBUG_OBJECT (self, "Early stop of encoding thread");
     self->output_flow = GST_FLOW_FLUSHING;
     g_atomic_int_set (&self->processing, FALSE);
   }
 
-  GST_DEBUG_OBJECT (self, "Decoding task destroyed: %s",
+  GST_DEBUG_OBJECT (self, "Encoding task destroyed: %s",
       gst_flow_get_name (self->output_flow));
+
 }
 
 static GstFlowReturn
-gst_v4l2_video_dec_handle_frame (GstVideoDecoder * decoder,
-    GstVideoCodecFrame * frame)
+gst_v4l2_video_enc_handle_frame (GstVideoEncoder * encoder,
+    GstVideoCodecFrame * frame, GstCaps * outcaps)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
   GstFlowReturn ret = GST_FLOW_OK;
+  GstStructure *structure;
 
   GST_DEBUG_OBJECT (self, "Handling frame %d", frame->system_frame_number);
 
@@ -468,34 +460,15 @@ gst_v4l2_video_dec_handle_frame (GstVideoDecoder * decoder,
       goto not_negotiated;
   }
 
-  if (G_UNLIKELY (!GST_V4L2_IS_ACTIVE (self->v4l2capture))) {
+  if (NULL != outcaps) {
     GstBufferPool *pool = GST_BUFFER_POOL (self->v4l2output->pool);
-    GstVideoInfo info;
-    GstVideoCodecState *output_state;
-    GstBuffer *codec_data;
+    gst_v4l2_object_set_format (self->v4l2capture, outcaps);
 
-    GST_DEBUG_OBJECT (self, "Sending header");
-
-    codec_data = self->input_state->codec_data;
-
-    /* We are running in byte-stream mode, so we don't know the headers, but
-     * we need to send something, otherwise the decoder will refuse to
-     * intialize.
-     */
-    if (codec_data) {
-      gst_buffer_ref (codec_data);
-    } else {
-      codec_data = frame->input_buffer;
-      frame->input_buffer = NULL;
-    }
-
-    /* Ensure input internal pool is active */
     if (!gst_buffer_pool_is_active (pool)) {
       GstStructure *config = gst_buffer_pool_get_config (pool);
-      gst_buffer_pool_config_set_params (config, self->input_state->caps,
-          self->v4l2output->info.size, 2, 2);
+      gst_buffer_pool_config_set_params (config,
+          self->input_state->caps, self->v4l2output->info.size, 16, 16);
 
-      /* There is no reason to refuse this config */
       if (!gst_buffer_pool_set_config (pool, config))
         goto activate_failed;
 
@@ -503,39 +476,24 @@ gst_v4l2_video_dec_handle_frame (GstVideoDecoder * decoder,
         goto activate_failed;
     }
 
-    GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
-    ret =
-        gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (self->
-            v4l2output->pool), &codec_data);
-    GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+    gst_video_encoder_set_output_state (encoder, outcaps, self->input_state);
 
-    gst_buffer_unref (codec_data);
-
-    if (!gst_v4l2_object_acquire_format (self->v4l2capture, &info))
-      goto not_negotiated;
-
-    output_state = gst_video_decoder_set_output_state (decoder,
-        info.finfo->format, info.width, info.height, self->input_state);
-
-    /* Copy the rest of the information, there might be more in the future */
-    output_state->info.interlace_mode = info.interlace_mode;
-    gst_video_codec_state_unref (output_state);
-
-    if (!gst_video_decoder_negotiate (decoder)) {
-      if (GST_PAD_IS_FLUSHING (decoder->srcpad))
+    if (!gst_video_encoder_negotiate (encoder)) {
+      if (GST_PAD_IS_FLUSHING (encoder->srcpad))
         goto flushing;
       else
         goto not_negotiated;
     }
 
-    /* Ensure our internal pool is activated */
-    if (!gst_buffer_pool_set_active (GST_BUFFER_POOL (self->v4l2capture->pool),
-            TRUE))
+    if (!gst_buffer_pool_set_active
+        (GST_BUFFER_POOL (self->v4l2capture->pool), TRUE)) {
+      GST_DEBUG ("active capture pool failed");
       goto activate_failed;
+    }
   }
 
   if (g_atomic_int_get (&self->processing) == FALSE) {
-    /* It's possible that the processing thread stopped due to an error */
+    /* It possible that the processing thread stopped due to an error */
     if (self->output_flow != GST_FLOW_OK &&
         self->output_flow != GST_FLOW_FLUSHING) {
       GST_DEBUG_OBJECT (self, "Processing loop stopped with error, leaving");
@@ -543,23 +501,23 @@ gst_v4l2_video_dec_handle_frame (GstVideoDecoder * decoder,
       goto drop;
     }
 
-    GST_DEBUG_OBJECT (self, "Starting decoding thread");
+    GST_DEBUG_OBJECT (self, "Starting encoding thread");
 
     /* Start the processing task, when it quits, the task will disable input
      * processing to unlock input if draining, or prevent potential block */
     g_atomic_int_set (&self->processing, TRUE);
-    if (!gst_pad_start_task (decoder->srcpad,
-            (GstTaskFunction) gst_v4l2_video_dec_loop, self,
-            (GDestroyNotify) gst_v4l2_video_dec_loop_stopped))
+    if (!gst_pad_start_task (encoder->srcpad,
+            (GstTaskFunction) gst_v4l2_video_enc_loop, self,
+            (GDestroyNotify) gst_v4l2_video_enc_loop_stopped))
       goto start_task_failed;
   }
 
   if (frame->input_buffer) {
-    GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+    GST_VIDEO_ENCODER_STREAM_UNLOCK (encoder);
     ret =
-        gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (self->v4l2output->
-            pool), &frame->input_buffer);
-    GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+        gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL
+        (self->v4l2output->pool), &frame->input_buffer);
+    GST_VIDEO_ENCODER_STREAM_LOCK (encoder);
 
     if (ret == GST_FLOW_FLUSHING) {
       if (g_atomic_int_get (&self->processing) == FALSE)
@@ -575,7 +533,6 @@ gst_v4l2_video_dec_handle_frame (GstVideoDecoder * decoder,
 
   gst_video_codec_frame_unref (frame);
   return ret;
-
   /* ERRORS */
 not_negotiated:
   {
@@ -588,19 +545,18 @@ activate_failed:
     GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
         (_("Failed to allocate required memory.")),
         ("Buffer pool activation failed"));
-    ret = GST_FLOW_ERROR;
-    goto drop;
+    return GST_FLOW_ERROR;
+
   }
 flushing:
   {
     ret = GST_FLOW_FLUSHING;
     goto drop;
   }
-
 start_task_failed:
   {
     GST_ELEMENT_ERROR (self, RESOURCE, FAILED,
-        (_("Failed to start decoding thread.")), (NULL));
+        (_("Failed to start encoding thread.")), (NULL));
     g_atomic_int_set (&self->processing, FALSE);
     ret = GST_FLOW_ERROR;
     goto drop;
@@ -615,39 +571,39 @@ process_failed:
   }
 drop:
   {
-    gst_video_decoder_drop_frame (decoder, frame);
+    gst_video_encoder_finish_frame (encoder, frame);
     return ret;
   }
 }
 
 static gboolean
-gst_v4l2_video_dec_decide_allocation (GstVideoDecoder * decoder,
-    GstQuery * query)
+gst_v4l2_video_enc_decide_allocation (GstVideoEncoder *
+    encoder, GstQuery * query)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
   GstClockTime latency;
   gboolean ret = FALSE;
 
+  self->v4l2capture->info.size = MAX_CODEC_FRAME;
+
   if (gst_v4l2_object_decide_allocation (self->v4l2capture, query))
-    ret = GST_VIDEO_DECODER_CLASS (parent_class)->decide_allocation (decoder,
-        query);
-
+    ret =
+        GST_VIDEO_ENCODER_CLASS
+        (parent_class)->decide_allocation (encoder, query);
   latency = self->v4l2capture->min_buffers * self->v4l2capture->duration;
-  gst_video_decoder_set_latency (decoder, latency, latency);
-
+  gst_video_encoder_set_latency (encoder, latency, latency);
   return ret;
 }
 
 static gboolean
-gst_v4l2_video_dec_src_query (GstVideoDecoder * decoder, GstQuery * query)
+gst_v4l2_video_enc_src_query (GstVideoEncoder * encoder, GstQuery * query)
 {
   gboolean ret = TRUE;
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
-
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
   switch (GST_QUERY_TYPE (query)) {
     case GST_QUERY_CAPS:{
       GstCaps *filter, *result = NULL;
-      GstPad *pad = GST_VIDEO_DECODER_SRC_PAD (decoder);
+      GstPad *pad = GST_VIDEO_ENCODER_SRC_PAD (encoder);
 
       gst_query_parse_caps (query, &filter);
 
@@ -671,31 +627,57 @@ gst_v4l2_video_dec_src_query (GstVideoDecoder * decoder, GstQuery * query)
     }
 
     default:
-      ret = GST_VIDEO_DECODER_CLASS (parent_class)->src_query (decoder, query);
+      ret = GST_VIDEO_ENCODER_CLASS (parent_class)->src_query (encoder, query);
       break;
   }
 
   return ret;
 }
 
-static GstCaps *
-gst_v4l2_video_dec_sink_getcaps (GstVideoDecoder * decoder, GstCaps * filter)
+static gboolean
+gst_v4l2_video_enc_sink_query (GstVideoEncoder * encoder, GstQuery * query)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
-  GstCaps *result;
+  gboolean ret = TRUE;
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
 
-  result = gst_video_decoder_proxy_getcaps (decoder, self->probed_sinkcaps,
-      filter);
+  switch (GST_QUERY_TYPE (query)) {
+    case GST_QUERY_CAPS:{
+      GstCaps *filter, *result = NULL;
+      GstPad *pad = GST_VIDEO_ENCODER_SINK_PAD (encoder);
 
-  GST_DEBUG_OBJECT (self, "Returning sink caps %" GST_PTR_FORMAT, result);
+      gst_query_parse_caps (query, &filter);
 
-  return result;
+      if (self->probed_sinkcaps)
+        result = gst_caps_ref (self->probed_sinkcaps);
+      else
+        result = gst_pad_get_pad_template_caps (pad);
+
+      if (filter) {
+        GstCaps *tmp = result;
+        result =
+            gst_caps_intersect_full (filter, tmp, GST_CAPS_INTERSECT_FIRST);
+        gst_caps_unref (tmp);
+      }
+
+      GST_DEBUG_OBJECT (self, "Returning sink caps %" GST_PTR_FORMAT, result);
+
+      gst_query_set_caps_result (query, result);
+      gst_caps_unref (result);
+      break;
+    }
+
+    default:
+      ret = GST_VIDEO_ENCODER_CLASS (parent_class)->sink_query (encoder, query);
+      break;
+  }
+
+  return ret;
 }
 
 static gboolean
-gst_v4l2_video_dec_sink_event (GstVideoDecoder * decoder, GstEvent * event)
+gst_v4l2_video_enc_sink_event (GstVideoEncoder * encoder, GstEvent * event)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (decoder);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
   gboolean ret;
 
   switch (GST_EVENT_TYPE (event)) {
@@ -708,14 +690,12 @@ gst_v4l2_video_dec_sink_event (GstVideoDecoder * decoder, GstEvent * event)
       break;
   }
 
-  ret = GST_VIDEO_DECODER_CLASS (parent_class)->sink_event (decoder, event);
+  ret = GST_VIDEO_ENCODER_CLASS (parent_class)->sink_event (encoder, event);
 
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_FLUSH_START:
-      /* The processing thread should stop now, wait for it */
-      gst_pad_stop_task (decoder->srcpad);
+      gst_pad_stop_task (encoder->srcpad);
       GST_DEBUG_OBJECT (self, "flush start done");
-      break;
     default:
       break;
   }
@@ -724,26 +704,26 @@ gst_v4l2_video_dec_sink_event (GstVideoDecoder * decoder, GstEvent * event)
 }
 
 static GstStateChangeReturn
-gst_v4l2_video_dec_change_state (GstElement * element,
+gst_v4l2_video_enc_change_state (GstElement * element,
     GstStateChange transition)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (element);
-  GstVideoDecoder *decoder = GST_VIDEO_DECODER (element);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (element);
+  GstVideoEncoder *encoder = GST_VIDEO_ENCODER (element);
 
   if (transition == GST_STATE_CHANGE_PAUSED_TO_READY) {
     g_atomic_int_set (&self->active, FALSE);
     gst_v4l2_object_unlock (self->v4l2output);
     gst_v4l2_object_unlock (self->v4l2capture);
-    gst_pad_stop_task (decoder->srcpad);
+    gst_pad_stop_task (encoder->srcpad);
   }
 
   return GST_ELEMENT_CLASS (parent_class)->change_state (element, transition);
 }
 
 static void
-gst_v4l2_video_dec_dispose (GObject * object)
+gst_v4l2_video_enc_dispose (GObject * object)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (object);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (object);
 
   gst_caps_replace (&self->probed_sinkcaps, NULL);
   gst_caps_replace (&self->probed_srccaps, NULL);
@@ -752,9 +732,9 @@ gst_v4l2_video_dec_dispose (GObject * object)
 }
 
 static void
-gst_v4l2_video_dec_finalize (GObject * object)
+gst_v4l2_video_enc_finalize (GObject * object)
 {
-  GstV4l2VideoDec *self = GST_V4L2_VIDEO_DEC (object);
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (object);
 
   gst_v4l2_object_destroy (self->v4l2capture);
   gst_v4l2_object_destroy (self->v4l2output);
@@ -763,76 +743,74 @@ gst_v4l2_video_dec_finalize (GObject * object)
 }
 
 static void
-gst_v4l2_video_dec_init (GstV4l2VideoDec * self)
+gst_v4l2_video_enc_init (GstV4l2VideoEnc * self)
 {
   /* V4L2 object are created in subinstance_init */
 }
 
 static void
-gst_v4l2_video_dec_class_init (GstV4l2VideoDecClass * klass)
+gst_v4l2_video_enc_class_init (GstV4l2VideoEncClass * klass)
 {
   GstElementClass *element_class;
   GObjectClass *gobject_class;
-  GstVideoDecoderClass *video_decoder_class;
+  GstVideoEncoderClass *video_encoder_class;
 
   parent_class = g_type_class_peek_parent (klass);
 
   element_class = (GstElementClass *) klass;
   gobject_class = (GObjectClass *) klass;
-  video_decoder_class = (GstVideoDecoderClass *) klass;
+  video_encoder_class = (GstVideoEncoderClass *) klass;
 
-  GST_DEBUG_CATEGORY_INIT (gst_v4l2_video_dec_debug, "v4l2videodec", 0,
-      "V4L2 Video Decoder");
+  GST_DEBUG_CATEGORY_INIT (gst_v4l2_video_enc_debug, "v4l2videoenc", 0,
+      "V4L2 Video Encoder");
 
   gst_element_class_set_static_metadata (element_class,
-      "V4L2 Video Decoder",
-      "Codec/Decoder/Video",
-      "Decode video streams via V4L2 API",
-      "Nicolas Dufresne <nicolas.dufresne@collabora.co.uk>");
+      "V4L2 Video Encoder",
+      "Codec/Encoder/Video",
+      "Encode video streams via V4L2 API", "ayaka <ayaka@soulik.info>");
 
-  gobject_class->dispose = GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_dispose);
-  gobject_class->finalize = GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_finalize);
+  gobject_class->dispose = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_dispose);
+  gobject_class->finalize = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_finalize);
   gobject_class->set_property =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_set_property);
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_set_property);
   gobject_class->get_property =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_get_property);
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_get_property);
 
-  video_decoder_class->open = GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_open);
-  video_decoder_class->close = GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_close);
-  video_decoder_class->start = GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_start);
-  video_decoder_class->stop = GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_stop);
-  video_decoder_class->finish = GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_finish);
-  video_decoder_class->flush = GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_flush);
-  video_decoder_class->set_format =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_set_format);
-  video_decoder_class->negotiate =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_negotiate);
-  video_decoder_class->decide_allocation =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_decide_allocation);
+  video_encoder_class->open = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_open);
+  video_encoder_class->close = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_close);
+  video_encoder_class->start = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_start);
+  video_encoder_class->stop = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_stop);
+  video_encoder_class->finish = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_finish);
+  video_encoder_class->flush = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_flush);
+  video_encoder_class->set_format =
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_set_format);
+  video_encoder_class->negotiate =
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_negotiate);
+  video_encoder_class->decide_allocation =
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_decide_allocation);
+  video_encoder_class->sink_query =
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_sink_query);
+  video_encoder_class->src_query =
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_src_query);
+  video_encoder_class->sink_event =
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_sink_event);
   /* FIXME propose_allocation or not ? */
-  video_decoder_class->handle_frame =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_handle_frame);
-  video_decoder_class->getcaps =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_sink_getcaps);
-  video_decoder_class->src_query =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_src_query);
-  video_decoder_class->sink_event =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_sink_event);
+  klass->handle_frame = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_handle_frame);
 
   element_class->change_state =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_dec_change_state);
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_change_state);
 
   gst_v4l2_object_install_m2m_properties_helper (gobject_class);
 }
 
 /* Probing functions */
 gboolean
-gst_v4l2_is_video_dec (GstCaps * sink_caps, GstCaps * src_caps)
+gst_v4l2_is_video_enc (GstCaps * sink_caps, GstCaps * src_caps)
 {
   gboolean ret = FALSE;
 
-  if (gst_caps_is_subset (sink_caps, gst_v4l2_object_get_codec_caps ())
-      && gst_caps_is_subset (src_caps, gst_v4l2_object_get_raw_caps ()))
+  if (gst_caps_is_subset (sink_caps, gst_v4l2_object_get_raw_caps ())
+      && gst_caps_is_subset (src_caps, gst_v4l2_object_get_codec_caps ()))
     ret = TRUE;
 
   return ret;
