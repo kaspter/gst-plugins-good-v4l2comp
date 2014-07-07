@@ -18,6 +18,8 @@ libgstvideo4linux2_la_SOURCES = gstv4l2.c \
 				gstv4l2transform.c \
 				gstv4l2videoaggregator.c \
 				gstv4l2videodec.c \
+				gstv4l2videoenc.c \
+				gstv4l2h264enc.c \
 				gstv4l2vidorient.c \
 				v4l2_calls.c \
 				v4l2-utils.c \
@@ -65,6 +67,8 @@ noinst_HEADERS = \
 	gstv4l2videoaggregator.h \
 	gstv4l2videoaggregatorpad.h \
 	gstv4l2videodec.h \
+	gstv4l2videoenc.h \
+	gstv4l2h264enc.h \
 	gstv4l2vidorient.h \
 	v4l2_calls.h \
 	v4l2-utils.h \
