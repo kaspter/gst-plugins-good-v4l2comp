@@ -212,17 +212,17 @@ gst_v4l2_transform_set_caps (GstBaseTransform * trans, GstCaps * incaps,
   gst_caps_replace (&self->incaps, incaps);
   gst_caps_replace (&self->outcaps, outcaps);
 
-  if (!gst_v4l2_object_set_format (self->v4l2output, incaps))
-    goto incaps_failed;
-
   if (!gst_v4l2_object_set_format (self->v4l2capture, outcaps))
     goto outcaps_failed;
 
+  if (!gst_v4l2_object_set_format (self->v4l2output, incaps))
+    goto incaps_failed;
+
   /* FIXME implement fallback if crop not supported */
-  if (!gst_v4l2_object_set_crop (self->v4l2output))
+  if (!gst_v4l2_object_set_crop (self->v4l2capture))
     goto failed;
 
-  if (!gst_v4l2_object_set_crop (self->v4l2capture))
+  if (!gst_v4l2_object_set_crop (self->v4l2output))
     goto failed;
 
   return TRUE;
