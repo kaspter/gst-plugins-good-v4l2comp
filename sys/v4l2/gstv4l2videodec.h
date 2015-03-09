@@ -82,6 +82,14 @@ gboolean gst_v4l2_video_dec_register (GstPlugin * plugin,
                                       const gchar *device_path,
                                       GstCaps * sink_caps, GstCaps * src_caps);
 
+void
+gst_v4l2_video_dec_set_property (GObject * object,
+    guint prop_id, const GValue * value, GParamSpec * pspec);
+
+void
+gst_v4l2_video_dec_get_property (GObject * object,
+    guint prop_id, GValue * value, GParamSpec * pspec);
+
 G_END_DECLS
 
 #endif /* __GST_V4L2_VIDEO_DEC_H__ */

@@ -57,7 +57,7 @@ enum
 G_DEFINE_ABSTRACT_TYPE (GstV4l2VideoDec, gst_v4l2_video_dec,
     GST_TYPE_VIDEO_DECODER);
 
-static void
+void
 gst_v4l2_video_dec_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec)
 {
@@ -83,7 +83,7 @@ gst_v4l2_video_dec_set_property (GObject * object,
   }
 }
 
-static void
+void
 gst_v4l2_video_dec_get_property (GObject * object,
     guint prop_id, GValue * value, GParamSpec * pspec)
 {
