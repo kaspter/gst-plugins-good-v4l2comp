@@ -55,7 +55,7 @@ GST_DEBUG_CATEGORY_EXTERN (v4l2_debug);
 #define DEFAULT_PROP_FREQUENCY          0
 #define DEFAULT_PROP_IO_MODE            GST_V4L2_IO_AUTO
 
-#define ENCODED_BUFFER_SIZE             (2 * 1024 * 1024)
+#define ENCODED_BUFFER_SIZE             (1 * 1024 * 1024)
 
 enum
 {
@@ -416,7 +416,7 @@ gst_v4l2_object_install_m2m_subclass_properties_helper (GObjectClass *
 {
   g_object_class_install_property (gobject_class, PROP_DEVICE,
       g_param_spec_string ("device", "Device", "Device location",
-          NULL, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+          NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 GstV4l2Object *
@@ -732,20 +732,19 @@ gst_v4l2_object_get_property_helper (GstV4l2Object * v4l2object,
 static void
 gst_v4l2_get_driver_min_buffers (GstV4l2Object * v4l2object)
 {
-  int min;
-  gboolean ret = FALSE;
+  struct v4l2_control control = { 0, };
 
-  /* Certain driver may expose a minimum number of buffers through controls. */
-  /* If the ioctl is not supported by the driver, min_buffers remains zero.  */
-  ret = gst_v4l2_get_attribute (v4l2object,
-      V4L2_TYPE_IS_OUTPUT (v4l2object->type)
-      ? V4L2_CID_MIN_BUFFERS_FOR_OUTPUT : V4L2_CID_MIN_BUFFERS_FOR_CAPTURE,
-      &min);
+  g_return_if_fail (GST_V4L2_IS_OPEN (v4l2object));
 
-  if (ret) {
+  if (V4L2_TYPE_IS_OUTPUT (v4l2object->type))
+    control.id = V4L2_CID_MIN_BUFFERS_FOR_OUTPUT;
+  else
+    control.id = V4L2_CID_MIN_BUFFERS_FOR_CAPTURE;
+
+  if (v4l2_ioctl (v4l2object->video_fd, VIDIOC_G_CTRL, &control) == 0) {
     GST_DEBUG_OBJECT (v4l2object->element,
-        "driver requires a minimum of %d buffers", min);
-    v4l2object->min_buffers = min;
+        "driver requires a minimum of %d buffers", control.value);
+    v4l2object->min_buffers = control.value;
   } else {
     v4l2object->min_buffers = 0;
   }
@@ -2912,50 +2911,52 @@ gst_v4l2_object_set_format_full (GstV4l2Object * v4l2object, GstCaps * caps,
       streamparm.parm.capture.timeperframe.denominator;
   GST_VIDEO_INFO_FPS_D (&info) = streamparm.parm.capture.timeperframe.numerator;
 
-  GST_DEBUG_OBJECT (v4l2object->element, "Got framerate: %u/%u",
-      streamparm.parm.capture.timeperframe.denominator,
-      streamparm.parm.capture.timeperframe.numerator);
+  if (v4l2object->type == V4L2_BUF_TYPE_VIDEO_CAPTURE
+      || v4l2object->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+    GST_DEBUG_OBJECT (v4l2object->element, "Got framerate: %u/%u",
+        streamparm.parm.capture.timeperframe.denominator,
+        streamparm.parm.capture.timeperframe.numerator);
 
-  /* We used to skip frame rate setup if the camera was already setup
-   * with the requested frame rate. This breaks some cameras though,
-   * causing them to not output data (several models of Thinkpad cameras
-   * have this problem at least).
-   * So, don't skip. */
-  GST_LOG_OBJECT (v4l2object->element, "Setting framerate to %u/%u", fps_n,
-      fps_d);
-  /* We want to change the frame rate, so check whether we can. Some cheap USB
-   * cameras don't have the capability */
-  if ((streamparm.parm.capture.capability & V4L2_CAP_TIMEPERFRAME) == 0) {
-    GST_DEBUG_OBJECT (v4l2object->element,
-        "Not setting framerate (not supported)");
-    goto done;
-  }
-
-  /* Note: V4L2 wants the frame interval, we have the frame rate */
-  streamparm.parm.capture.timeperframe.numerator = fps_d;
-  streamparm.parm.capture.timeperframe.denominator = fps_n;
-
-  /* some cheap USB cam's won't accept any change */
-  if (v4l2_ioctl (fd, VIDIOC_S_PARM, &streamparm) < 0)
-    goto set_parm_failed;
-
-  if (streamparm.parm.capture.timeperframe.numerator > 0 &&
-    streamparm.parm.capture.timeperframe.denominator > 0) {
-    /* get new values */
-    fps_d = streamparm.parm.capture.timeperframe.numerator;
-    fps_n = streamparm.parm.capture.timeperframe.denominator;
-
-    GST_INFO_OBJECT (v4l2object->element, "Set framerate to %u/%u", fps_n,
+    /* We used to skip frame rate setup if the camera was already setup
+     * with the requested frame rate. This breaks some cameras though,
+     * causing them to not output data (several models of Thinkpad cameras
+     * have this problem at least).
+     * So, don't skip. */
+    GST_LOG_OBJECT (v4l2object->element, "Setting framerate to %u/%u", fps_n,
         fps_d);
-  } else {
-    /* fix v4l2 capture driver to provide framerate values */
-    GST_WARNING_OBJECT (v4l2object->element,
-        "Reuse caps framerate %u/%u - fix v4l2 capture driver",
-        fps_n, fps_d);
-  }
+    /* We want to change the frame rate, so check whether we can. Some cheap USB
+     * cameras don't have the capability */
+    if ((streamparm.parm.capture.capability & V4L2_CAP_TIMEPERFRAME) == 0) {
+      GST_DEBUG_OBJECT (v4l2object->element,
+          "Not setting framerate (not supported)");
+      goto done;
+    }
 
-  GST_VIDEO_INFO_FPS_N (&info) = fps_n;
-  GST_VIDEO_INFO_FPS_D (&info) = fps_d;
+    /* Note: V4L2 wants the frame interval, we have the frame rate */
+    streamparm.parm.capture.timeperframe.numerator = fps_d;
+    streamparm.parm.capture.timeperframe.denominator = fps_n;
+
+    /* some cheap USB cam's won't accept any change */
+    if (v4l2_ioctl (fd, VIDIOC_S_PARM, &streamparm) < 0)
+      goto set_parm_failed;
+
+    if (streamparm.parm.capture.timeperframe.numerator > 0 &&
+        streamparm.parm.capture.timeperframe.denominator > 0) {
+      /* get new values */
+      fps_d = streamparm.parm.capture.timeperframe.numerator;
+      fps_n = streamparm.parm.capture.timeperframe.denominator;
+
+      GST_INFO_OBJECT (v4l2object->element, "Set framerate to %u/%u", fps_n,
+          fps_d);
+    } else {
+      /* fix v4l2 capture driver to provide framerate values */
+      GST_WARNING_OBJECT (v4l2object->element,
+          "Reuse caps framerate %u/%u - fix v4l2 capture driver", fps_n, fps_d);
+    }
+
+    GST_VIDEO_INFO_FPS_N (&info) = fps_n;
+    GST_VIDEO_INFO_FPS_D (&info) = fps_d;
+  }
 
 done:
   /* add boolean return, so we can fail on drivers bugs */

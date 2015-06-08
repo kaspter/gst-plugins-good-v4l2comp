@@ -220,6 +220,8 @@ struct _RTPSession {
 
   guint         probation;
 
+  GstRTPProfile rtp_profile;
+
   /* bandwidths */
   gboolean     recalc_bandwidth;
   guint        bandwidth;
@@ -228,6 +230,8 @@ struct _RTPSession {
   guint        rtcp_rs_bandwidth;
 
   guint32       suggested_ssrc;
+  gboolean      internal_ssrc_set;
+  gboolean      internal_ssrc_from_caps_or_property;
 
   /* for sender/receiver counting */
   guint32       key;
@@ -237,8 +241,10 @@ struct _RTPSession {
   guint         total_sources;
 
   guint16       generation;
-  GstClockTime  next_rtcp_check_time;
-  GstClockTime  last_rtcp_send_time;
+  GstClockTime  next_rtcp_check_time; /* tn */
+  GstClockTime  last_rtcp_check_time; /* tp */
+  GstClockTime  last_rtcp_send_time;  /* t_rr_last */
+  GstClockTime  last_rtcp_interval;   /* T_rr */
   GstClockTime  start_time;
   gboolean      first_rtcp;
   gboolean      allow_early;
@@ -343,7 +349,7 @@ GstStructure *  rtp_session_get_sdes_struct        (RTPSession *sess);
 void            rtp_session_set_sdes_struct        (RTPSession *sess, const GstStructure *sdes);
 
 /* handling sources */
-guint32         rtp_session_suggest_ssrc           (RTPSession *sess);
+guint32         rtp_session_suggest_ssrc           (RTPSession *sess, gboolean *is_random);
 
 gboolean        rtp_session_add_source             (RTPSession *sess, RTPSource *src);
 guint           rtp_session_get_num_sources        (RTPSession *sess);

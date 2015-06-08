@@ -201,6 +201,7 @@ enum
 #define DEFAULT_USE_PIPELINE_CLOCK   FALSE
 #define DEFAULT_RTCP_MIN_INTERVAL    (RTP_STATS_MIN_INTERVAL * GST_SECOND)
 #define DEFAULT_PROBATION            RTP_DEFAULT_PROBATION
+#define DEFAULT_RTP_PROFILE          GST_RTP_PROFILE_AVP
 
 enum
 {
@@ -216,7 +217,8 @@ enum
   PROP_USE_PIPELINE_CLOCK,
   PROP_RTCP_MIN_INTERVAL,
   PROP_PROBATION,
-  PROP_STATS
+  PROP_STATS,
+  PROP_RTP_PROFILE
 };
 
 #define GST_RTP_SESSION_GET_PRIVATE(obj)  \
@@ -342,7 +344,7 @@ on_ssrc_collision (RTPSession * session, RTPSource * src, GstRtpSession * sess)
 
     /* if there is no source using the suggested ssrc, most probably because
      * this ssrc has just collided, suggest upstream to use it */
-    suggested_ssrc = rtp_session_suggest_ssrc (session);
+    suggested_ssrc = rtp_session_suggest_ssrc (session, NULL);
     internal_src = rtp_session_get_source_by_ssrc (session, suggested_ssrc);
     if (!internal_src)
       gst_structure_set (structure, "suggested-ssrc", G_TYPE_UINT,
@@ -645,6 +647,11 @@ gst_rtp_session_class_init (GstRtpSessionClass * klass)
           "Various statistics", GST_TYPE_STRUCTURE,
           G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class, PROP_RTP_PROFILE,
+      g_param_spec_enum ("rtp-profile", "RTP Profile",
+          "RTP profile to use", GST_TYPE_RTP_PROFILE, DEFAULT_RTP_PROFILE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   gstelement_class->change_state =
       GST_DEBUG_FUNCPTR (gst_rtp_session_change_state);
   gstelement_class->request_new_pad =
@@ -776,6 +783,9 @@ gst_rtp_session_set_property (GObject * object, guint prop_id,
     case PROP_PROBATION:
       g_object_set_property (G_OBJECT (priv->session), "probation", value);
       break;
+    case PROP_RTP_PROFILE:
+      g_object_set_property (G_OBJECT (priv->session), "rtp-profile", value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -832,6 +842,9 @@ gst_rtp_session_get_property (GObject * object, guint prop_id,
       break;
     case PROP_STATS:
       g_value_take_boxed (value, gst_rtp_session_create_stats (rtpsession));
+      break;
+    case PROP_RTP_PROFILE:
+      g_object_get_property (G_OBJECT (priv->session), "rtp-profile", value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1994,18 +2007,26 @@ gst_rtp_session_getcaps_send_rtp (GstPad * pad, GstRtpSession * rtpsession,
   GstCaps *result;
   GstStructure *s1, *s2;
   guint ssrc;
+  gboolean is_random;
 
   priv = rtpsession->priv;
 
-  ssrc = rtp_session_suggest_ssrc (priv->session);
+  ssrc = rtp_session_suggest_ssrc (priv->session, &is_random);
 
   /* we can basically accept anything but we prefer to receive packets with our
    * internal SSRC so that we don't have to patch it. Create a structure with
-   * the SSRC and another one without. */
-  s1 = gst_structure_new ("application/x-rtp", "ssrc", G_TYPE_UINT, ssrc, NULL);
-  s2 = gst_structure_new_empty ("application/x-rtp");
+   * the SSRC and another one without.
+   * Only do this if the session actually decided on an ssrc already,
+   * otherwise we give upstream the opportunity to select an ssrc itself */
+  if (!is_random) {
+    s1 = gst_structure_new ("application/x-rtp", "ssrc", G_TYPE_UINT, ssrc,
+        NULL);
+    s2 = gst_structure_new_empty ("application/x-rtp");
 
-  result = gst_caps_new_full (s1, s2, NULL);
+    result = gst_caps_new_full (s1, s2, NULL);
+  } else {
+    result = gst_caps_new_empty_simple ("application/x-rtp");
+  }
 
   if (filter) {
     GstCaps *caps = result;
