@@ -2362,6 +2362,7 @@ gst_qt_mux_update_global_statistics (GstQTMux * qtmux)
 static void
 gst_qt_mux_update_edit_lists (GstQTMux * qtmux)
 {
+#if 0
   GSList *walk;
 
   GST_DEBUG_OBJECT (qtmux, "Media first ts selected: %" GST_TIME_FORMAT,
@@ -2401,6 +2402,7 @@ gst_qt_mux_update_edit_lists (GstQTMux * qtmux)
       }
     }
   }
+#endif
 }
 
 static GstFlowReturn
