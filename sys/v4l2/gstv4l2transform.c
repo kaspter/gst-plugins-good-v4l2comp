@@ -1074,7 +1074,7 @@ gst_v4l2_transform_class_init (GstV4l2TransformClass * klass)
 
   gst_element_class_set_static_metadata (element_class,
       "V4L2 Video Converter",
-      "Filter/Converter/Video",
+      "Filter/Converter/Video/Scaler",
       "Transform streams via V4L2 API",
       "Nicolas Dufresne <nicolas.dufresne@collabora.com>");
 
