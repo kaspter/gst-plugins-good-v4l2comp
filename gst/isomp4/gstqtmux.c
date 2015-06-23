@@ -493,6 +493,7 @@ gst_qt_mux_pad_reset (GstQTPad * qtpad)
   qtpad->sample_size = 0;
   qtpad->sync = FALSE;
   qtpad->last_dts = 0;
+  qtpad->dts_adjustment = GST_CLOCK_TIME_NONE;
   qtpad->first_ts = GST_CLOCK_TIME_NONE;
   qtpad->prepare_buf_func = NULL;
   qtpad->create_empty_buffer = NULL;
@@ -2450,22 +2451,37 @@ gst_qt_mux_update_edit_lists (GstQTMux * qtmux)
   for (walk = qtmux->collect->data; walk; walk = g_slist_next (walk)) {
     GstCollectData *cdata = (GstCollectData *) walk->data;
     GstQTPad *qtpad = (GstQTPad *) cdata;
-    guint32 lateness;
-    guint32 duration;
 
-    if (GST_CLOCK_TIME_IS_VALID (qtpad->first_ts)
-        && qtpad->first_ts > qtmux->first_ts) {
-      lateness =
-          gst_util_uint64_scale_round (qtpad->first_ts - qtmux->first_ts,
-          qtmux->timescale, GST_SECOND);
-      duration = qtpad->trak->tkhd.duration;
+    if (GST_CLOCK_TIME_IS_VALID (qtpad->first_ts)) {
+      guint32 lateness = 0;
+      guint32 duration = qtpad->trak->tkhd.duration;
+      gboolean has_gap;
+      gboolean has_shift;
 
-      GST_DEBUG_OBJECT (qtmux, "Pad %s is a late stream by %" GST_TIME_FORMAT,
-          GST_PAD_NAME (qtpad->collect.pad), GST_TIME_ARGS (lateness));
-      atom_trak_set_elst_entry (qtpad->trak, 0, lateness, (guint32) - 1,
-          (guint32) (1 * 65536.0));
-      atom_trak_set_elst_entry (qtpad->trak, 1, duration, 0,
-          (guint32) (1 * 65536.0));
+      has_gap = (qtpad->first_ts > (qtmux->first_ts + qtpad->dts_adjustment));
+      has_shift = (qtpad->dts_adjustment > 0);
+
+      if (has_gap) {
+        GstClockTime diff;
+
+        diff = qtpad->first_ts - (qtmux->first_ts + qtpad->dts_adjustment);
+        lateness = gst_util_uint64_scale_round (diff,
+            qtmux->timescale, GST_SECOND);
+
+        GST_DEBUG_OBJECT (qtmux, "Pad %s is a late stream by %" GST_TIME_FORMAT,
+            GST_PAD_NAME (qtpad->collect.pad), GST_TIME_ARGS (lateness));
+
+        atom_trak_set_elst_entry (qtpad->trak, 0, lateness, (guint32) - 1,
+            (guint32) (1 * 65536.0));
+      }
+
+      if (has_gap || has_shift) {
+        guint32 shift = gst_util_uint64_scale_round (qtpad->dts_adjustment,
+            atom_trak_get_timescale (qtpad->trak), GST_SECOND);
+
+        atom_trak_set_elst_entry (qtpad->trak, 1, duration, shift,
+            (guint32) (1 * 65536.0));
+      }
 
       /* need to add the empty time to the trak duration */
       duration += lateness;
@@ -2996,9 +3012,6 @@ gst_qt_mux_add_buffer (GstQTMux * qtmux, GstQTPad * pad, GstBuffer * buf)
         GST_BUFFER_DTS (buf)) {
       GST_BUFFER_DTS (buf) = GST_BUFFER_DTS (last_buf) + last_buf_duration;
     }
-
-    if (GST_BUFFER_PTS_IS_VALID (buf))
-      GST_BUFFER_DTS (buf) = MIN (GST_BUFFER_DTS (buf), GST_BUFFER_PTS (buf));
   }
 
   if (last_buf && !buf && !GST_BUFFER_DURATION_IS_VALID (last_buf)) {
@@ -3026,10 +3039,10 @@ gst_qt_mux_add_buffer (GstQTMux * qtmux, GstQTPad * pad, GstBuffer * buf)
 
   /* if this is the first buffer, store the timestamp */
   if (G_UNLIKELY (pad->first_ts == GST_CLOCK_TIME_NONE) && last_buf) {
-    if (GST_BUFFER_DTS_IS_VALID (last_buf)) {
-      pad->first_ts = GST_BUFFER_DTS (last_buf);
-    } else if (GST_BUFFER_PTS_IS_VALID (last_buf)) {
+    if (GST_BUFFER_PTS_IS_VALID (last_buf)) {
       pad->first_ts = GST_BUFFER_PTS (last_buf);
+    } else if (GST_BUFFER_DTS_IS_VALID (last_buf)) {
+      pad->first_ts = GST_BUFFER_DTS (last_buf);
     }
 
     if (GST_CLOCK_TIME_IS_VALID (pad->first_ts)) {
@@ -3248,6 +3261,57 @@ not_negotiated:
   }
 }
 
+/*
+ * DTS running time can be negative. There is no way to represent that in
+ * MP4 however, thus we need to offset DTS so that it starts from 0.
+ */
+static void
+gst_qt_pad_adjust_buffer_dts (GstQTMux * qtmux, GstQTPad * pad,
+    GstCollectData * cdata, GstBuffer ** buf)
+{
+  GstClockTime pts;
+  gint64 dts;
+
+  pts = GST_BUFFER_PTS (*buf);
+  dts = GST_COLLECT_PADS_DTS (cdata);
+
+  GST_LOG_OBJECT (qtmux, "selected pad %s with PTS %" GST_TIME_FORMAT
+      " and DTS %" GST_STIME_FORMAT, GST_PAD_NAME (cdata->pad),
+      GST_TIME_ARGS (pts), GST_STIME_ARGS (dts));
+
+  if (!GST_CLOCK_TIME_IS_VALID (pad->dts_adjustment)) {
+    if (GST_CLOCK_STIME_IS_VALID (dts) && dts < 0)
+      pad->dts_adjustment = -dts;
+    else
+      pad->dts_adjustment = 0;
+  }
+
+  if (pad->dts_adjustment > 0) {
+    *buf = gst_buffer_make_writable (*buf);
+
+    dts += pad->dts_adjustment;
+
+    if (GST_CLOCK_TIME_IS_VALID (pts))
+      pts += pad->dts_adjustment;
+
+    if (GST_CLOCK_STIME_IS_VALID (dts) && dts < 0) {
+      GST_WARNING_OBJECT (pad, "Decreasing DTS.");
+      dts = 0;
+    }
+
+    if (pts < dts) {
+      GST_WARNING_OBJECT (pad, "DTS is bigger then PTS");
+      pts = dts;
+    }
+
+    GST_BUFFER_PTS (*buf) = pts;
+    GST_BUFFER_DTS (*buf) = dts;
+
+    GST_LOG_OBJECT (qtmux, "time adjusted to PTS %" GST_TIME_FORMAT
+        " and DTS %" GST_TIME_FORMAT, GST_TIME_ARGS (pts), GST_TIME_ARGS (dts));
+  }
+}
+
 static GstFlowReturn
 gst_qt_mux_handle_buffer (GstCollectPads * pads, GstCollectData * cdata,
     GstBuffer * buf, gpointer user_data)
@@ -3255,7 +3319,6 @@ gst_qt_mux_handle_buffer (GstCollectPads * pads, GstCollectData * cdata,
   GstFlowReturn ret = GST_FLOW_OK;
   GstQTMux *qtmux = GST_QT_MUX_CAST (user_data);
   GstQTPad *best_pad = NULL;
-  GstClockTime best_time = GST_CLOCK_TIME_NONE;
 
   if (G_UNLIKELY (qtmux->state == GST_QT_MUX_STATE_STARTED)) {
     if ((ret = gst_qt_mux_start_file (qtmux)) != GST_FLOW_OK)
@@ -3272,9 +3335,7 @@ gst_qt_mux_handle_buffer (GstCollectPads * pads, GstCollectData * cdata,
   /* clipping already converted to running time */
   if (best_pad != NULL) {
     g_assert (buf);
-    best_time = GST_BUFFER_PTS (buf);
-    GST_LOG_OBJECT (qtmux, "selected pad %s with time %" GST_TIME_FORMAT,
-        GST_PAD_NAME (best_pad->collect.pad), GST_TIME_ARGS (best_time));
+    gst_qt_pad_adjust_buffer_dts (qtmux, best_pad, cdata, &buf);
     ret = gst_qt_mux_add_buffer (qtmux, best_pad, buf);
   } else {
     qtmux->state = GST_QT_MUX_STATE_EOS;
