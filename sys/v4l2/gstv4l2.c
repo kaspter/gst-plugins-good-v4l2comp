@@ -42,7 +42,6 @@
 #include "gstv4l2src.h"
 #include "gstv4l2sink.h"
 #include "gstv4l2radio.h"
-#include "gstv4l2videodec.h"
 #include "gstv4l2deviceprovider.h"
 #include "gstv4l2transform.h"
 #include "gstv4l2videodec.h"
