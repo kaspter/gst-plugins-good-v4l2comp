@@ -354,7 +354,9 @@ gst_v4l2_video_enc_finish (GstVideoEncoder * encoder)
     /* If the encoder stop command succeeded, just wait until processing is
      * finished */
     GST_OBJECT_LOCK (encoder->srcpad->task);
-    GST_TASK_WAIT (encoder->srcpad->task);
+//    GST_TASK_WAIT (encoder->srcpad->task);
+    /* Wait one second before quitting */
+    g_usleep (1 * G_USEC_PER_SEC);
     GST_OBJECT_UNLOCK (encoder->srcpad->task);
     ret = GST_FLOW_FLUSHING;
   } else {
