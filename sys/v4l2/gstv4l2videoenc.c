@@ -38,8 +38,6 @@
 GST_DEBUG_CATEGORY_STATIC (gst_v4l2_video_enc_debug);
 #define GST_CAT_DEFAULT gst_v4l2_video_enc_debug
 
-#define MAX_CODEC_FRAME (2 * 1024 * 1024)
-
 static gboolean gst_v4l2_video_enc_flush (GstVideoEncoder * encoder);
 
 enum
@@ -365,8 +363,8 @@ gst_v4l2_video_enc_finish (GstVideoEncoder * encoder)
     while (ret == GST_FLOW_OK) {
       buffer = gst_buffer_new ();
       ret =
-          gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (self->
-              v4l2output->pool), &buffer);
+          gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (self->v4l2output->
+              pool), &buffer);
       gst_buffer_unref (buffer);
     }
   }
@@ -427,7 +425,9 @@ gst_v4l2_video_enc_loop (GstVideoEncoder * encoder)
 
   GST_LOG_OBJECT (encoder, "Allocate output buffer");
 
-  buffer = gst_video_encoder_allocate_output_buffer (encoder, MAX_CODEC_FRAME);
+  buffer =
+      gst_video_encoder_allocate_output_buffer (encoder,
+      self->v4l2capture->info.size);
 
   if (NULL == buffer) {
     ret = GST_FLOW_FLUSHING;
