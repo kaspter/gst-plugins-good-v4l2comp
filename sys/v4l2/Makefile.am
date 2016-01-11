@@ -3,6 +3,7 @@ plugin_LTLIBRARIES = libgstvideo4linux2.la
 include $(top_srcdir)/common/gst-glib-gen.mak
 
 libgstvideo4linux2_la_SOURCES = gstv4l2.c \
+				gstv4l2aggregator.c \
 				gstv4l2allocator.c \
 				gstv4l2colorbalance.c \
 				gstv4l2deviceprovider.c \
@@ -13,6 +14,7 @@ libgstvideo4linux2_la_SOURCES = gstv4l2.c \
 				gstv4l2radio.c \
 				gstv4l2tuner.c \
 				gstv4l2transform.c \
+				gstv4l2videoaggregator.c \
 				gstv4l2videodec.c \
 				gstv4l2vidorient.c \
 				v4l2_calls.c \
@@ -44,6 +46,7 @@ noinst_HEADERS = \
 	ext/v4l2-common.h \
 	ext/v4l2-controls.h \
 	ext/videodev2.h \
+	gstv4l2aggregator.h \
 	gstv4l2allocator.h \
 	gstv4l2bufferpool.h \
 	gstv4l2colorbalance.h \
@@ -54,6 +57,8 @@ noinst_HEADERS = \
 	gstv4l2radio.h \
 	gstv4l2tuner.h \
 	gstv4l2transform.h \
+	gstv4l2videoaggregator.h \
+	gstv4l2videoaggregatorpad.h \
 	gstv4l2videodec.h \
 	gstv4l2vidorient.h \
 	v4l2_calls.h \
