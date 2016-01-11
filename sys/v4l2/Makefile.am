@@ -6,6 +6,7 @@ libgstvideo4linux2_la_SOURCES = gstv4l2.c \
 				gstv4l2aggregator.c \
 				gstv4l2allocator.c \
 				gstv4l2colorbalance.c \
+				gstv4l2compositor.c \
 				gstv4l2deviceprovider.c \
 				gstv4l2object.c \
 				gstv4l2bufferpool.c \
@@ -50,6 +51,8 @@ noinst_HEADERS = \
 	gstv4l2allocator.h \
 	gstv4l2bufferpool.h \
 	gstv4l2colorbalance.h \
+	gstv4l2compositor.h \
+	gstv4l2compositorpad.h \
 	gstv4l2deviceprovider.h \
 	gstv4l2object.h \
 	gstv4l2sink.h \
