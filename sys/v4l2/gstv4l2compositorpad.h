@@ -23,6 +23,7 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
+#include "gstv4l2m2m.h"
 
 G_BEGIN_DECLS
 
@@ -51,7 +52,8 @@ struct _GstV4l2CompositorPad
   /* properties */
   gint xpos, ypos;
   gint width, height;
-  gdouble alpha;
+
+  GstV4l2M2m *m2m;
 
   GstVideoConverter *convert;
   GstVideoInfo conversion_info;

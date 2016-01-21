@@ -1571,7 +1571,7 @@ gst_v4l2_buffer_pool_new (GstV4l2Object * obj, GstCaps * caps)
     goto dup_failed;
 
   /* setting a significant unique name */
-  parent_name = gst_object_get_name (GST_OBJECT (obj->element));
+  parent_name = g_strdup (GST_OBJECT_NAME (GST_OBJECT (obj->element)));
   name = g_strconcat (parent_name, ":", "pool:",
       V4L2_TYPE_IS_OUTPUT (obj->type) ? "sink" : "src", NULL);
   g_free (parent_name);
@@ -1705,9 +1705,11 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
 
   g_return_val_if_fail (gst_buffer_pool_is_active (bpool), GST_FLOW_ERROR);
 
+  GST_DEBUG ("trace");
   if (GST_BUFFER_POOL_IS_FLUSHING (pool))
     return GST_FLOW_FLUSHING;
 
+  GST_DEBUG ("trace");
   switch (obj->type) {
     case V4L2_BUF_TYPE_VIDEO_CAPTURE:
     case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
@@ -1846,14 +1848,18 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
           GstV4l2MemoryGroup *group;
           gint index;
 
+  GST_DEBUG ("trace");
           if ((*buf)->pool != bpool)
             goto copying;
 
+  GST_DEBUG ("trace");
           if (!gst_v4l2_is_buffer_valid (*buf, &group))
             goto copying;
 
+  GST_DEBUG ("trace");
           index = group->buffer.index;
 
+  GST_DEBUG ("trace");
           GST_LOG_OBJECT (pool, "processing buffer %i from our pool", index);
 
           index = group->buffer.index;
@@ -1935,6 +1941,7 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
       g_assert_not_reached ();
       break;
   }
+  GST_DEBUG ("trace");
 done:
   return ret;
 

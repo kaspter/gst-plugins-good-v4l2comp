@@ -23,6 +23,7 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
+#include "gstv4l2m2m.h"
 #include "gstv4l2videoaggregator.h"
 
 
@@ -49,6 +50,11 @@ typedef struct _GstV4l2CompositorClass GstV4l2CompositorClass;
 struct _GstV4l2Compositor
 {
   GstV4l2VideoAggregator videoaggregator;
+
+  GstV4l2M2m * m2m;
+  GstCaps *probed_sinkcaps;
+  GstCaps *probed_srccaps;
+  GstCaps *outcaps;
 };
 
 struct _GstV4l2CompositorClass

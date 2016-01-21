@@ -1278,6 +1278,8 @@ prepare_frames (GstV4l2VideoAggregator * vagg, GstV4l2VideoAggregatorPad * pad)
   GstV4l2VideoAggregatorPadClass *vaggpad_class =
       GST_V4L2_VIDEO_AGGREGATOR_PAD_GET_CLASS (pad);
 
+  GST_DEBUG ("prepare_frames %p", pad->buffer);
+
   if (pad->buffer == NULL || !vaggpad_class->prepare_frame)
     return TRUE;
 
@@ -1325,6 +1327,8 @@ gst_v4l2videoaggregator_do_aggregate (GstV4l2VideoAggregator * vagg,
   /* Sync pad properties to the stream time */
   gst_v4l2_aggregator_iterate_sinkpads (GST_V4L2_AGGREGATOR (vagg),
       (GstV4l2AggregatorPadForeachFunc) sync_pad_values, NULL);
+
+  GST_DEBUG ("calling prepare_frames");
 
   /* Convert all the frames the subclass has before aggregating */
   gst_v4l2_aggregator_iterate_sinkpads (GST_V4L2_AGGREGATOR (vagg),
@@ -2068,7 +2072,7 @@ gst_v4l2videoaggregator_class_init (GstV4l2VideoAggregatorClass * klass)
   GstElementClass *gstelement_class = (GstElementClass *) klass;
   GstV4l2AggregatorClass *agg_class = (GstV4l2AggregatorClass *) klass;
 
-  GST_DEBUG_CATEGORY_INIT (gst_v4l2videoaggregator_debug, "videoaggregator", 0,
+  GST_DEBUG_CATEGORY_INIT (gst_v4l2videoaggregator_debug, "v4l2videoaggregator", 0,
       "base video aggregator");
 
   gst_v4l2videoaggregator_parent_class = g_type_class_peek_parent (klass);

@@ -1,8 +1,5 @@
-/* Video compositor plugin
- * Copyright (C) 2004, 2008 Wim Taymans <wim@fluendo.com>
- * Copyright (C) 2010 Sebastian Dröge <sebastian.droege@collabora.co.uk>
- * Copyright (C) 2014 Mathieu Duponchelle <mathieu.duponchelle@opencreed.com>
- * Copyright (C) 2014 Thibault Saunier <tsaunier@gnome.org>
+/* Video compositor plugin using V4L2 abilities
+ * Copyright (C) 2016 Frédéric Sureau <frederic.sureau@veo-labs.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,92 +17,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-/**
- * SECTION:element-compositor
- *
- * Compositor can accept AYUV, ARGB and BGRA video streams. For each of the requested
- * sink pads it will compare the incoming geometry and framerate to define the
- * output parameters. Indeed output video frames will have the geometry of the
- * biggest incoming video stream and the framerate of the fastest incoming one.
- *
- * Compositor will do colorspace conversion.
- * 
- * Individual parameters for each input stream can be configured on the
- * #GstV4l2CompositorPad:
- *
- * <itemizedlist>
- * <listitem>
- * "xpos": The x-coordinate position of the top-left corner of the picture
- * (#gint)
- * </listitem>
- * <listitem>
- * "ypos": The y-coordinate position of the top-left corner of the picture
- * (#gint)
- * </listitem>
- * <listitem>
- * "width": The width of the picture; the input will be scaled if necessary
- * (#gint)
- * </listitem>
- * <listitem>
- * "height": The height of the picture; the input will be scaled if necessary
- * (#gint)
- * </listitem>
- * <listitem>
- * "alpha": The transparency of the picture; between 0.0 and 1.0. The blending
- * is a simple copy when fully-transparent (0.0) and fully-opaque (1.0).
- * (#gdouble)
- * </listitem>
- * <listitem>
- * "zorder": The z-order position of the picture in the composition
- * (#guint)
- * </listitem>
- * </itemizedlist>
- *
- * <refsect2>
- * <title>Sample pipelines</title>
- * |[
- * gst-launch-1.0 \
- *   videotestsrc pattern=1 ! \
- *   video/x-raw,format=AYUV,framerate=\(fraction\)10/1,width=100,height=100 ! \
- *   videobox border-alpha=0 top=-70 bottom=-70 right=-220 ! \
- *   compositor name=comp sink_0::alpha=0.7 sink_1::alpha=0.5 ! \
- *   videoconvert ! xvimagesink \
- *   videotestsrc ! \
- *   video/x-raw,format=AYUV,framerate=\(fraction\)5/1,width=320,height=240 ! comp.
- * ]| A pipeline to demonstrate compositor used together with videobox.
- * This should show a 320x240 pixels video test source with some transparency
- * showing the background checker pattern. Another video test source with just
- * the snow pattern of 100x100 pixels is overlayed on top of the first one on
- * the left vertically centered with a small transparency showing the first
- * video test source behind and the checker pattern under it. Note that the
- * framerate of the output video is 10 frames per second.
- * |[
- * gst-launch-1.0 videotestsrc pattern=1 ! \
- *   video/x-raw, framerate=\(fraction\)10/1, width=100, height=100 ! \
- *   compositor name=comp ! videoconvert ! ximagesink \
- *   videotestsrc !  \
- *   video/x-raw, framerate=\(fraction\)5/1, width=320, height=240 ! comp.
- * ]| A pipeline to demostrate bgra comping. (This does not demonstrate alpha blending). 
- * |[
- * gst-launch-1.0 videotestsrc pattern=1 ! \
- *   video/x-raw,format =I420, framerate=\(fraction\)10/1, width=100, height=100 ! \
- *   compositor name=comp ! videoconvert ! ximagesink \
- *   videotestsrc ! \
- *   video/x-raw,format=I420, framerate=\(fraction\)5/1, width=320, height=240 ! comp.
- * ]| A pipeline to test I420
- * |[
- * gst-launch-1.0 compositor name=comp sink_1::alpha=0.5 sink_1::xpos=50 sink_1::ypos=50 ! \
- *   videoconvert ! ximagesink \
- *   videotestsrc pattern=snow timestamp-offset=3000000000 ! \
- *   "video/x-raw,format=AYUV,width=640,height=480,framerate=(fraction)30/1" ! \
- *   timeoverlay ! queue2 ! comp. \
- *   videotestsrc pattern=smpte ! \
- *   "video/x-raw,format=AYUV,width=800,height=600,framerate=(fraction)10/1" ! \
- *   timeoverlay ! queue2 ! comp.
- * ]| A pipeline to demonstrate synchronized compositing (the second stream starts after 3 seconds)
- * </refsect2>
- */
-
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -114,9 +25,10 @@
 
 #include "gstv4l2compositor.h"
 #include "gstv4l2compositorpad.h"
+#include "v4l2_calls.h"
 
-GST_DEBUG_CATEGORY_STATIC (gst_v4l2_compositor_debug);
-#define GST_CAT_DEFAULT gst_v4l2_compositor_debug
+GST_DEBUG_CATEGORY_STATIC (gst_v4l2compositor_debug);
+#define GST_CAT_DEFAULT gst_v4l2compositor_debug
 
 #define FORMATS " { AYUV, BGRA, ARGB, RGBA, ABGR, Y444, Y42B, YUY2, UYVY, "\
                 "   YVYU, I420, YV12, NV12, NV21, Y41B, RGB, BGR, xRGB, xBGR, "\
@@ -138,15 +50,13 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink_%u",
 #define DEFAULT_PAD_YPOS   0
 #define DEFAULT_PAD_WIDTH  0
 #define DEFAULT_PAD_HEIGHT 0
-#define DEFAULT_PAD_ALPHA  1.0
 enum
 {
   PROP_PAD_0,
   PROP_PAD_XPOS,
   PROP_PAD_YPOS,
   PROP_PAD_WIDTH,
-  PROP_PAD_HEIGHT,
-  PROP_PAD_ALPHA
+  PROP_PAD_HEIGHT
 };
 
 G_DEFINE_TYPE (GstV4l2CompositorPad, gst_v4l2_compositor_pad,
@@ -170,9 +80,6 @@ gst_v4l2_compositor_pad_get_property (GObject * object, guint prop_id,
       break;
     case PROP_PAD_HEIGHT:
       g_value_set_int (value, pad->height);
-      break;
-    case PROP_PAD_ALPHA:
-      g_value_set_double (value, pad->alpha);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -198,9 +105,6 @@ gst_v4l2_compositor_pad_set_property (GObject * object, guint prop_id,
       break;
     case PROP_PAD_HEIGHT:
       pad->height = g_value_get_int (value);
-      break;
-    case PROP_PAD_ALPHA:
-      pad->alpha = g_value_get_double (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -382,6 +286,8 @@ gst_v4l2_compositor_pad_prepare_frame (GstV4l2VideoAggregatorPad * pad,
    * Due to the clamping, this is different from the frame width/height above. */
   GstVideoRectangle frame_rect;
 
+  GST_DEBUG_OBJECT (pad, "buffer is %p", pad->buffer);
+
   if (!pad->buffer)
     return TRUE;
 
@@ -465,12 +371,6 @@ gst_v4l2_compositor_pad_prepare_frame (GstV4l2VideoAggregatorPad * pad,
     g_free (wanted_colorimetry);
   }
 
-  if (cpad->alpha == 0.0) {
-    GST_DEBUG_OBJECT (vagg, "Pad has alpha 0.0, not converting frame");
-    converted_frame = NULL;
-    goto done;
-  }
-
   frame_rect = clamp_rectangle (cpad->xpos, cpad->ypos, width, height,
       GST_VIDEO_INFO_WIDTH (&vagg->info), GST_VIDEO_INFO_HEIGHT (&vagg->info));
 
@@ -504,8 +404,7 @@ gst_v4l2_compositor_pad_prepare_frame (GstV4l2VideoAggregatorPad * pad,
 
     /* Check if there's a buffer to be aggregated, ensure it can't have an alpha
      * channel, then check opacity and frame boundaries */
-    if (pad2->buffer && cpad2->alpha == 1.0 &&
-        !GST_VIDEO_INFO_HAS_ALPHA (&pad2->info) &&
+    if (pad2->buffer && 
         is_rectangle_contained (frame_rect, frame2_rect)) {
       frame_obscured = TRUE;
       GST_DEBUG_OBJECT (pad, "%ix%i@(%i,%i) obscured by %s %ix%i@(%i,%i) "
@@ -594,7 +493,26 @@ gst_v4l2_compositor_pad_finalize (GObject * object)
     gst_video_converter_free (pad->convert);
   pad->convert = NULL;
 
+  gst_v4l2_m2m_destroy (pad->m2m);
+  
   G_OBJECT_CLASS (gst_v4l2_compositor_pad_parent_class)->finalize (object);
+}
+
+static void
+gst_v4l2_compositor_pad_init (GstV4l2CompositorPad * cpad)
+{
+  cpad->xpos = DEFAULT_PAD_XPOS;
+  cpad->ypos = DEFAULT_PAD_YPOS;
+  cpad->width = DEFAULT_PAD_WIDTH;
+  cpad->height = DEFAULT_PAD_HEIGHT;
+
+  cpad->m2m = gst_v4l2_m2m_new (NULL, NULL, NULL);
+
+  cpad->m2m->v4l2output->no_initial_format = TRUE;
+  cpad->m2m->v4l2output->keep_aspect = FALSE;
+
+  cpad->m2m->v4l2capture->no_initial_format = TRUE;
+  cpad->m2m->v4l2capture->keep_aspect = FALSE;
 }
 
 static void
@@ -624,10 +542,6 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
       g_param_spec_int ("height", "Height", "Height of the picture",
           G_MININT, G_MAXINT, DEFAULT_PAD_HEIGHT,
           G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (gobject_class, PROP_PAD_ALPHA,
-      g_param_spec_double ("alpha", "Alpha", "Alpha of the picture", 0.0, 1.0,
-          DEFAULT_PAD_ALPHA,
-          G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS));
 
   vaggpadclass->set_info = GST_DEBUG_FUNCPTR (gst_v4l2_compositor_pad_set_info);
   vaggpadclass->prepare_frame =
@@ -636,16 +550,9 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
       GST_DEBUG_FUNCPTR (gst_v4l2_compositor_pad_clean_frame);
 }
 
-static void
-gst_v4l2_compositor_pad_init (GstV4l2CompositorPad * compo_pad)
-{
-  compo_pad->xpos = DEFAULT_PAD_XPOS;
-  compo_pad->ypos = DEFAULT_PAD_YPOS;
-  compo_pad->alpha = DEFAULT_PAD_ALPHA;
-}
-
 
 /* GstV4l2Compositor */
+
 enum
 {
   PROP_0,
@@ -659,7 +566,10 @@ gst_v4l2_compositor_get_property (GObject * object,
 
   switch (prop_id) {
     default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      if (!gst_v4l2_m2m_get_property_helper (self->m2m, prop_id, value,
+          pspec)) {
+        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      }
       break;
   }
 }
@@ -672,7 +582,10 @@ gst_v4l2_compositor_set_property (GObject * object,
 
   switch (prop_id) {
     default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      if (!gst_v4l2_m2m_set_property_helper (self->m2m, prop_id, value,
+          pspec)) {
+        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      }
       break;
   }
 }
@@ -680,15 +593,8 @@ gst_v4l2_compositor_set_property (GObject * object,
 #define gst_v4l2_compositor_parent_class parent_class
 G_DEFINE_TYPE (GstV4l2Compositor, gst_v4l2_compositor, GST_TYPE_V4L2_VIDEO_AGGREGATOR);
 
-static gboolean
-set_functions (GstV4l2Compositor * self, GstVideoInfo * info)
-{
-  gboolean ret = FALSE;
-  return ret;
-}
-
 static GstCaps *
-_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
+gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
 {
   GList *l;
   gint best_width = -1, best_height = -1;
@@ -726,9 +632,8 @@ _update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
   if (best_width > 0 && best_height > 0) {
     info.width = best_width;
     info.height = best_height;
-    if (set_functions (GST_V4L2_COMPOSITOR (vagg), &info))
-      ret = gst_video_info_to_caps (&info);
 
+    ret = gst_video_info_to_caps (&info);
     gst_caps_set_simple (ret, "pixel-aspect-ratio", GST_TYPE_FRACTION_RANGE,
         1, G_MAXINT, G_MAXINT, 1, NULL);
   }
@@ -737,75 +642,536 @@ _update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
 }
 
 static GstFlowReturn
-gst_v4l2_compositor_aggregate_frames (GstV4l2VideoAggregator * vagg, GstBuffer * outbuf)
+gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2CompositorPad * cpad,
+    GstBuffer * inbuf, GstBuffer ** outbuf)
 {
-  GList *l;
-  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
-  GstVideoFrame out_frame, *outframe;
+  GstV4l2M2m * m2m = cpad->m2m;
+  GstBufferPool *output_pool = GST_BUFFER_POOL (m2m->v4l2output->pool);
+  GstBufferPool *capture_pool = GST_BUFFER_POOL (m2m->v4l2capture->pool);
+  GstFlowReturn ret = GST_FLOW_OK;
 
-  if (!gst_video_frame_map (&out_frame, &vagg->info, outbuf, GST_MAP_WRITE)) {
-    GST_WARNING_OBJECT (vagg, "Could not map output buffer");
+  if (inbuf == NULL) {
+    GST_WARNING_OBJECT (cpad, "Input buffer is NULL");
     return GST_FLOW_ERROR;
   }
 
-  outframe = &out_frame;
+  /* Ensure input internal pool is active */
+  if (!gst_buffer_pool_is_active (output_pool)) {
+    GstStructure *config = gst_buffer_pool_get_config (output_pool);
+    gint min = m2m->v4l2output->min_buffers == 0 ? GST_V4L2_MIN_BUFFERS :
+        m2m->v4l2output->min_buffers;
+
+    GstCaps * incaps = gst_pad_get_current_caps (GST_PAD (cpad));
+    gst_buffer_pool_config_set_params (config, incaps,
+        m2m->v4l2output->info.size, min, min);
+    gst_caps_unref (incaps);
+
+    /* There is no reason to refuse this config */
+    if (!gst_buffer_pool_set_config (output_pool, config))
+      goto activate_failed;
+
+    if (!gst_buffer_pool_set_active (output_pool, TRUE))
+      goto activate_failed;
+  }
+
+  GST_DEBUG_OBJECT (cpad, "Queue input buffer");
+  ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (output_pool),
+      &inbuf);
+  if (G_UNLIKELY (ret != GST_FLOW_OK))
+    goto beach;
+
+  do {
+    ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf);
+
+  } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
+
+beach:
+  return ret;
+
+activate_failed:
+  GST_ERROR_OBJECT (cpad, "Failed to activate pool");
+  return GST_FLOW_ERROR;
+  
+alloc_failed:
+  GST_DEBUG_OBJECT (cpad, "could not allocate buffer from pool");
+  return ret;
+}
+
+static GstFlowReturn
+gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer ** outbuf)
+{
+  GList *l;
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
+  GstV4l2M2m * m2m = self->m2m;
+  GstBufferPool *output_pool = GST_BUFFER_POOL (m2m->v4l2output->pool);
+  GstBufferPool *capture_pool = GST_BUFFER_POOL (m2m->v4l2capture->pool);
+  GstFlowReturn ret = GST_FLOW_OK;
+  GstBuffer ** midbuf;
+
+  GST_DEBUG_OBJECT (self, "Producing output buffer");
+
+  /* Ensure input internal pool is active */
+  if (!gst_buffer_pool_is_active (output_pool)) {
+    GstStructure *config = gst_buffer_pool_get_config (output_pool);
+    gint min = m2m->v4l2output->min_buffers == 0 ? GST_V4L2_MIN_BUFFERS :
+        m2m->v4l2output->min_buffers;
+    gst_buffer_pool_config_set_params (config, self->outcaps,
+        m2m->v4l2output->info.size, min, min);
+
+    /* There is no reason to refuse this config */
+    if (!gst_buffer_pool_set_config (output_pool, config))
+      goto activate_failed;
+
+    if (!gst_buffer_pool_set_active (output_pool, TRUE))
+      goto activate_failed;
+  }
+
+  GST_DEBUG_OBJECT (self, "Dequeue intermediate buffer");
+  ret = gst_buffer_pool_acquire_buffer (output_pool, midbuf, NULL);
+
+  if (ret != GST_FLOW_OK)
+    goto alloc_failed;
 
   GST_OBJECT_LOCK (vagg);
   for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
     GstV4l2VideoAggregatorPad *pad = l->data;
-    GstV4l2CompositorPad *compo_pad = GST_V4L2_COMPOSITOR_PAD (pad);
+    GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
-    if (pad->aggregated_frame != NULL) {
-      //memset black
-    }
+    gst_v4l2_compositor_pad_prepare_output_buffer (cpad, pad->buffer, midbuf);
   }
   GST_OBJECT_UNLOCK (vagg);
 
-  gst_video_frame_unmap (outframe);
+  GST_DEBUG_OBJECT (self, "Queue intermediate buffer");
+  ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (output_pool), midbuf);
+  if (G_UNLIKELY (ret != GST_FLOW_OK))
+    goto beach;
 
+  do {
+    if (!gst_buffer_pool_set_active (capture_pool, TRUE))
+      goto activate_failed;
+
+    GST_DEBUG_OBJECT (self, "Dequeue output buffer");
+    ret = gst_buffer_pool_acquire_buffer (capture_pool, outbuf, NULL);
+
+    if (ret != GST_FLOW_OK)
+      goto alloc_failed;
+
+    ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf);
+
+  } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
+
+  if (ret != GST_FLOW_OK) {
+    gst_buffer_unref (*outbuf);
+    *outbuf = NULL;
+  }
+
+pad_error:
+  GST_OBJECT_UNLOCK (vagg);
+  return ret;
+
+beach:
+  return ret;
+
+activate_failed:
+  GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
+      ("failed to activate bufferpool"), ("failed to activate bufferpool"));
+  return GST_FLOW_ERROR;
+
+alloc_failed:
+  GST_DEBUG_OBJECT (self, "could not allocate buffer from pool");
+  return ret;
+}
+
+static GstFlowReturn
+gst_v4l2_compositor_aggregate_frames (GstV4l2VideoAggregator * vagg, GstBuffer * outbuf)
+{
+  GST_DEBUG_OBJECT (vagg, "Aggregate frames");
+
+  /* All has already been done in get_output_buffer */
   return GST_FLOW_OK;
 }
 
 static gboolean
-_sink_query (GstV4l2Aggregator * agg, GstV4l2AggregatorPad * bpad, GstQuery * query)
+gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
+    GstCaps * caps)
+{
+  GList * l;
+  GstV4l2Aggregator * agg = GST_V4L2_AGGREGATOR (vagg);
+  GstV4l2Compositor * self = GST_V4L2_COMPOSITOR (vagg);
+  GstQuery *query;
+  gboolean result = TRUE;
+
+  static gint count = 0;
+  if (count != 0)
+    return TRUE;
+  count = 1;
+
+  GST_DEBUG_OBJECT (self, "Use negotiated caps");
+
+  gst_caps_replace (&self->outcaps, caps);
+
+  /** Set format **/
+
+  GST_OBJECT_LOCK (vagg);
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    GstCaps * pad_caps;
+    GstPad *pad = l->data;
+    GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+
+    pad_caps = gst_pad_get_current_caps (pad);
+    if (!gst_v4l2_object_set_format (cpad->m2m->v4l2output, pad_caps)) {
+      goto padcaps_failed;
+    }
+
+    if (!gst_v4l2_object_set_format (cpad->m2m->v4l2capture, caps)) {
+      goto padcaps_failed;
+    }
+  }
+  GST_OBJECT_UNLOCK (vagg);
+
+  if (!gst_v4l2_object_set_format (self->m2m->v4l2output, caps))
+    goto outcaps_failed;
+
+  if (!gst_v4l2_object_set_format (self->m2m->v4l2capture, caps))
+    goto outcaps_failed;
+
+  /* TODO set_selection */
+  
+  /** Do allocations **/
+
+  /* find a pool for the negotiated caps now */
+  GST_DEBUG_OBJECT (self, "doing allocation query");
+  query = gst_query_new_allocation (caps, TRUE);
+  if (!gst_pad_peer_query (agg->srcpad, query)) {
+    /* not a problem, just debug a little */
+    GST_DEBUG_OBJECT (self, "peer ALLOCATION query failed");
+  }
+
+  if (gst_v4l2_object_decide_allocation (self->m2m->v4l2capture, query)) {
+    GstBufferPool *pool = GST_BUFFER_POOL (self->m2m->v4l2capture->pool);
+
+    if (!gst_buffer_pool_set_active (pool, TRUE))
+      goto activate_failed;
+  }
+
+  GST_DEBUG_OBJECT (self, "ALLOCATION (%d) params: %" GST_PTR_FORMAT, result,
+      query);
+
+  GST_OBJECT_LOCK (vagg);
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    GstPad *pad = l->data;
+    GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+
+    query = gst_query_new_allocation (caps, TRUE);
+    gst_v4l2_object_propose_allocation (self->m2m->v4l2output, query);
+
+    if (gst_v4l2_object_decide_allocation (cpad->m2m->v4l2capture, query)) {
+      GstBufferPool *pool = GST_BUFFER_POOL (cpad->m2m->v4l2capture->pool);
+
+      if (!gst_buffer_pool_set_active (pool, TRUE))
+        goto pad_activate_failed;
+    }
+  }
+  GST_OBJECT_UNLOCK (vagg);
+
+  goto done;
+
+  /* Errors */
+
+padcaps_failed:
+  GST_OBJECT_UNLOCK (vagg);
+  GST_ERROR_OBJECT (self, "failed to set output caps for pad: %" GST_PTR_FORMAT, caps);
+  goto failed;
+
+pad_activate_failed:
+  GST_OBJECT_UNLOCK (vagg);
+  GST_WARNING_OBJECT (self, "Failed to activate bufferpool for pad");
+  goto failed;
+
+outcaps_failed:
+  GST_ERROR_OBJECT (self, "failed to set output caps: %" GST_PTR_FORMAT, caps);
+  goto failed;
+
+activate_failed:
+  GST_WARNING_OBJECT (self, "Failed to activate bufferpool");
+  goto failed;
+
+failed:
+  result = FALSE;
+  goto done;
+
+done:
+  gst_query_unref (query);
+  return result;
+}
+
+static void
+gst_v4l2_compositor_close (GstV4l2Compositor * self);
+
+static gboolean
+gst_v4l2_compositor_open (GstV4l2Compositor * self)
+{
+  GList * l;
+  GstV4l2VideoAggregator * vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
+
+  GST_DEBUG_OBJECT (self, "Opening");
+
+  if (!gst_v4l2_m2m_open (self->m2m))
+    goto failure;
+
+  GST_OBJECT_LOCK (vagg);
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    GstV4l2CompositorPad *cpad = l->data;
+
+    if (!gst_v4l2_m2m_open (cpad->m2m))
+      goto pad_open_failed;
+  }
+  GST_OBJECT_UNLOCK (vagg);
+
+  self->probed_sinkcaps = gst_v4l2_object_get_caps (self->m2m->v4l2output,
+      gst_v4l2_object_get_raw_caps ());
+
+  if (gst_caps_is_empty (self->probed_sinkcaps))
+    goto no_input_format;
+
+  self->probed_srccaps = gst_v4l2_object_get_caps (self->m2m->v4l2capture,
+      gst_v4l2_object_get_raw_caps ());
+
+  if (gst_caps_is_empty (self->probed_srccaps))
+    goto no_output_format;
+
+  return TRUE;
+
+pad_open_failed:
+  GST_OBJECT_UNLOCK (vagg);
+  GST_ERROR_OBJECT (self, "failed to open pad m2m");
+  goto failure;
+
+no_input_format:
+  GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
+      ("Converter on device %s has no supported input format",
+          self->m2m->v4l2output->videodev), (NULL));
+  goto failure;
+
+no_output_format:
+  GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
+      ("Converter on device %s has no supported output format",
+          self->m2m->v4l2capture->videodev), (NULL));
+  goto failure;
+
+failure:
+  gst_v4l2_compositor_close (self);
+  return FALSE;
+}
+
+static void
+gst_v4l2_compositor_unlock (GstV4l2Compositor * self)
+{
+  GList * l;
+  GstV4l2VideoAggregator * vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
+
+  GST_DEBUG_OBJECT (self, "Unlock");
+
+  GST_OBJECT_LOCK (vagg);
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    GstV4l2CompositorPad *cpad = l->data;
+
+    gst_v4l2_m2m_unlock (cpad->m2m);
+  }
+  GST_OBJECT_UNLOCK (vagg);
+
+  gst_v4l2_m2m_unlock (self->m2m);
+}
+
+static void
+gst_v4l2_compositor_close (GstV4l2Compositor * self)
+{
+  GList * l;
+  GstV4l2VideoAggregator * vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
+
+  GST_DEBUG_OBJECT (self, "Closing");
+
+  GST_OBJECT_LOCK (vagg);
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    GstV4l2CompositorPad *cpad = l->data;
+
+    gst_v4l2_m2m_close (cpad->m2m);
+  }
+  GST_OBJECT_UNLOCK (vagg);
+
+  gst_v4l2_m2m_close (self->m2m);
+  gst_caps_replace (&self->probed_sinkcaps, NULL);
+  gst_caps_replace (&self->probed_srccaps, NULL);
+}
+
+static gboolean
+gst_v4l2_compositor_stop (GstV4l2Compositor * self)
+{
+  GList * l;
+  GstV4l2VideoAggregator * vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
+
+  GST_DEBUG_OBJECT (self, "Stop");
+
+  GST_OBJECT_LOCK (vagg);
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    GstV4l2CompositorPad *cpad = l->data;
+
+    gst_v4l2_m2m_stop (cpad->m2m);
+  }
+  GST_OBJECT_UNLOCK (vagg);
+
+  gst_v4l2_m2m_stop (self->m2m);
+  gst_caps_replace (&self->outcaps, NULL);
+
+  return TRUE;
+}
+
+static gboolean
+gst_v4l2_compositor_sink_query (GstV4l2Aggregator * agg,
+    GstV4l2AggregatorPad * bpad, GstQuery * query)
 {
   switch (GST_QUERY_TYPE (query)) {
     case GST_QUERY_ALLOCATION:{
-      GstCaps *caps;
-      GstVideoInfo info;
-      GstBufferPool *pool;
-      guint size;
-      GstStructure *structure;
+      GstV4l2CompositorPad * cpad = GST_V4L2_COMPOSITOR_PAD (bpad);
 
-      gst_query_parse_allocation (query, &caps, NULL);
+      GST_DEBUG_OBJECT (agg, "Allocation");
 
-      if (caps == NULL)
-        return FALSE;
-
-      if (!gst_video_info_from_caps (&info, caps))
-        return FALSE;
-
-      size = GST_VIDEO_INFO_SIZE (&info);
-
-      pool = gst_video_buffer_pool_new ();
-
-      structure = gst_buffer_pool_get_config (pool);
-      gst_buffer_pool_config_set_params (structure, caps, size, 0, 0);
-
-      if (!gst_buffer_pool_set_config (pool, structure)) {
-        gst_object_unref (pool);
-        return FALSE;
-      }
-
-      gst_query_add_allocation_pool (query, pool, size, 0, 0);
-      gst_object_unref (pool);
-      gst_query_add_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
-
-      return TRUE;
+      return gst_v4l2_object_propose_allocation (cpad->m2m->v4l2output, query);
     }
     default:
       return GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_query (agg, bpad, query);
   }
+}
+
+static gboolean
+gst_v4l2_compositor_sink_event (GstV4l2Aggregator * agg,
+    GstV4l2AggregatorPad * bpad, GstEvent * event)
+{
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (agg);
+  GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (bpad);
+  gboolean ret;
+
+  switch (GST_EVENT_TYPE (event)) {
+    case GST_EVENT_FLUSH_START:
+      GST_DEBUG_OBJECT (cpad, "flush start");
+      gst_v4l2_m2m_unlock (cpad->m2m);
+      break;
+    default:
+      break;
+  }
+
+  ret = GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_event (agg, bpad, event);
+
+  switch (GST_EVENT_TYPE (event)) {
+    case GST_EVENT_FLUSH_STOP:
+      /* Buffer should be back now */
+      GST_DEBUG_OBJECT (cpad, "flush stop");
+      gst_v4l2_m2m_unlock_stop (cpad->m2m);
+      break;
+    default:
+      break;
+  }
+
+  return ret;
+}
+
+static GstFlowReturn
+gst_v4l2_compositor_flush (GstV4l2Aggregator * agg)
+{
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (agg);
+
+  GST_DEBUG_OBJECT (self, "flush stop");
+  gst_v4l2_m2m_unlock_stop (self->m2m);
+
+  return GST_V4L2_AGGREGATOR_CLASS (parent_class)->flush (agg);
+}
+
+static GstV4l2AggregatorPad *
+gst_v4l2_compositor_create_new_pad (GstV4l2Aggregator * agg,
+    GstPadTemplate * templ, const gchar * req_name, const GstCaps * caps)
+{
+  GstV4l2AggregatorPad * pad;
+  GstV4l2CompositorPad * cpad;
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (agg);
+
+  pad = GST_V4L2_AGGREGATOR_CLASS (parent_class)->create_new_pad (agg, templ,
+      req_name, caps);
+
+  cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+//  cpad->m2m->v4l2output->videodev = g_strdup (self->m2m->v4l2output->videodev);
+  cpad->m2m->v4l2output->videodev = g_strdup ("/dev/v4l/by-path/ipu1-scaler");
+  cpad->m2m->v4l2output->req_mode = GST_V4L2_IO_DMABUF_IMPORT;
+  cpad->m2m->v4l2capture->req_mode = GST_V4L2_IO_DMABUF_IMPORT;
+  cpad->m2m->v4l2output->element = self;
+  cpad->m2m->v4l2capture->element = self;
+
+  return pad;
+}
+
+static GstStateChangeReturn
+gst_v4l2_compositor_change_state (GstElement * element,
+    GstStateChange transition)
+{
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (element);
+  GstStateChangeReturn ret;
+
+  switch (transition) {
+    case GST_STATE_CHANGE_NULL_TO_READY:
+      if (!gst_v4l2_compositor_open (self))
+        return GST_STATE_CHANGE_FAILURE;
+      break;
+    case GST_STATE_CHANGE_PAUSED_TO_READY:
+      gst_v4l2_compositor_unlock (self);
+      break;
+    default:
+      break;
+  }
+
+  ret = GST_ELEMENT_CLASS (parent_class)->change_state (element, transition);
+
+  switch (transition) {
+    case GST_STATE_CHANGE_READY_TO_NULL:
+      gst_v4l2_compositor_close (self);
+      break;
+    default:
+      break;
+  }
+
+  return ret;
+}
+
+static void
+gst_v4l2_compositor_dispose (GObject * object)
+{
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
+
+  gst_caps_replace (&self->probed_sinkcaps, NULL);
+  gst_caps_replace (&self->probed_srccaps, NULL);
+
+  G_OBJECT_CLASS (parent_class)->dispose (object);
+}
+
+static void
+gst_v4l2_compositor_finalize (GObject * object)
+{
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
+
+  gst_v4l2_m2m_destroy (self->m2m);
+
+  G_OBJECT_CLASS (parent_class)->finalize (object);
+}
+
+static void
+gst_v4l2_compositor_init (GstV4l2Compositor * self)
+{
+  /* Create scaler instance for src buffers allocations */
+  self->m2m = gst_v4l2_m2m_new (GST_ELEMENT (self), NULL, NULL);
+
+  self->m2m->v4l2output->no_initial_format = TRUE;
+  self->m2m->v4l2output->keep_aspect = FALSE;
+
+  self->m2m->v4l2capture->no_initial_format = TRUE;
+  self->m2m->v4l2capture->keep_aspect = FALSE;
 }
 
 /* GObject boilerplate */
@@ -818,27 +1184,45 @@ gst_v4l2_compositor_class_init (GstV4l2CompositorClass * klass)
       (GstV4l2VideoAggregatorClass *) klass;
   GstV4l2AggregatorClass *agg_class = (GstV4l2AggregatorClass *) klass;
 
-  gobject_class->get_property = gst_v4l2_compositor_get_property;
-  gobject_class->set_property = gst_v4l2_compositor_set_property;
+  GST_DEBUG_CATEGORY_INIT (gst_v4l2compositor_debug, "v4l2compositor", 0,
+      "video compositor");
+
+  gobject_class->dispose = GST_DEBUG_FUNCPTR (gst_v4l2_compositor_dispose);
+  gobject_class->finalize = GST_DEBUG_FUNCPTR (gst_v4l2_compositor_finalize);
+  gobject_class->get_property =
+      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_get_property);
+  gobject_class->set_property =
+      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_set_property);
 
   agg_class->sinkpads_type = GST_TYPE_V4L2_COMPOSITOR_PAD;
-  agg_class->sink_query = _sink_query;
-  videoaggregator_class->update_caps = _update_caps;
-  videoaggregator_class->aggregate_frames = gst_v4l2_compositor_aggregate_frames;
+  agg_class->stop = GST_DEBUG_FUNCPTR (gst_v4l2_compositor_stop);
+  agg_class->sink_event = GST_DEBUG_FUNCPTR (gst_v4l2_compositor_sink_event);
+  agg_class->sink_query = GST_DEBUG_FUNCPTR (gst_v4l2_compositor_sink_query);
+  agg_class->flush = GST_DEBUG_FUNCPTR (gst_v4l2_compositor_flush);
+  agg_class->create_new_pad =
+      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_create_new_pad);
+  videoaggregator_class->negotiated_caps =
+      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_negotiated_caps);
+  videoaggregator_class->update_caps =
+      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_update_caps);
+  videoaggregator_class->get_output_buffer =
+      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_get_output_buffer);
+  videoaggregator_class->aggregate_frames =
+      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_aggregate_frames);
+
+  gstelement_class->change_state =
+      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_change_state);
 
   gst_element_class_add_pad_template (gstelement_class,
       gst_static_pad_template_get (&src_factory));
   gst_element_class_add_pad_template (gstelement_class,
       gst_static_pad_template_get (&sink_factory));
 
-  gst_element_class_set_static_metadata (gstelement_class, "Compositor",
+  gst_element_class_set_static_metadata (gstelement_class, "V4l2Compositor",
       "Filter/Editor/Video/Compositor",
-      "Composite multiple video streams", "Wim Taymans <wim@fluendo.com>, "
-      "Sebastian Dröge <sebastian.droege@collabora.co.uk>");
-}
+      "Composite multiple video streams using V4L2 API",
+      "Frédéric Sureau <frederic.sureau@veo-labs.com>");
 
-static void
-gst_v4l2_compositor_init (GstV4l2Compositor * self)
-{
+  gst_v4l2_object_install_m2m_properties_helper (gobject_class);
 }
 
