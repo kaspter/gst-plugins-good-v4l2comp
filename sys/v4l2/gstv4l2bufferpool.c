@@ -1057,7 +1057,7 @@ select_error:
   }
 }
 
-static GstFlowReturn
+GstFlowReturn
 gst_v4l2_buffer_pool_qbuf (GstV4l2BufferPool * pool, GstBuffer * buf)
 {
   GstV4l2MemoryGroup *group = NULL;
@@ -1134,7 +1134,7 @@ queue_failed:
   }
 }
 
-static GstFlowReturn
+GstFlowReturn
 gst_v4l2_buffer_pool_dqbuf (GstV4l2BufferPool * pool, GstBuffer ** buffer)
 {
   GstFlowReturn res;
