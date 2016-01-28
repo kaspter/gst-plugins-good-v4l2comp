@@ -112,6 +112,7 @@ void                gst_v4l2_buffer_pool_copy_at_threshold (GstV4l2BufferPool * 
 
 GstFlowReturn       gst_v4l2_buffer_pool_qbuf (GstV4l2BufferPool * pool, GstBuffer * buf);
 GstFlowReturn       gst_v4l2_buffer_pool_dqbuf (GstV4l2BufferPool * pool, GstBuffer ** buffer);
+gboolean            gst_v4l2_is_buffer_valid (GstBuffer * buffer, GstV4l2MemoryGroup ** out_group);
 
 G_END_DECLS
 

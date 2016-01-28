@@ -166,303 +166,13 @@ gst_v4l2_compositor_pad_set_info (GstV4l2VideoAggregatorPad * pad,
     GstV4l2VideoAggregator * vagg G_GNUC_UNUSED,
     GstVideoInfo * current_info, GstVideoInfo * wanted_info)
 {
-  GstV4l2Compositor *comp = GST_V4L2_COMPOSITOR (vagg);
-  GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-  gchar *colorimetry, *best_colorimetry;
-  const gchar *chroma, *best_chroma;
-  gint width, height;
-
-  if (!current_info->finfo)
-    return TRUE;
-
-  if (GST_VIDEO_INFO_FORMAT (current_info) == GST_VIDEO_FORMAT_UNKNOWN)
-    return TRUE;
-
-  if (cpad->convert)
-    gst_video_converter_free (cpad->convert);
-
-  cpad->convert = NULL;
-
-  colorimetry = gst_video_colorimetry_to_string (&(current_info->colorimetry));
-  chroma = gst_video_chroma_to_string (current_info->chroma_site);
-
-  best_colorimetry =
-      gst_video_colorimetry_to_string (&(wanted_info->colorimetry));
-  best_chroma = gst_video_chroma_to_string (wanted_info->chroma_site);
-
-  _mixer_pad_get_output_size (comp, cpad, &width, &height);
-
-  if (GST_VIDEO_INFO_FORMAT (wanted_info) !=
-      GST_VIDEO_INFO_FORMAT (current_info)
-      || g_strcmp0 (colorimetry, best_colorimetry)
-      || g_strcmp0 (chroma, best_chroma)
-      || width != current_info->width || height != current_info->height) {
-    GstVideoInfo tmp_info;
-
-    /* Initialize with the wanted video format and our original width and
-     * height as we don't want to rescale. Then copy over the wanted
-     * colorimetry, and chroma-site and our current pixel-aspect-ratio
-     * and other relevant fields.
-     */
-    gst_video_info_set_format (&tmp_info, GST_VIDEO_INFO_FORMAT (wanted_info),
-        width, height);
-    tmp_info.chroma_site = wanted_info->chroma_site;
-    tmp_info.colorimetry = wanted_info->colorimetry;
-    tmp_info.par_n = vagg->info.par_n;
-    tmp_info.par_d = vagg->info.par_d;
-    tmp_info.fps_n = current_info->fps_n;
-    tmp_info.fps_d = current_info->fps_d;
-    tmp_info.flags = current_info->flags;
-    tmp_info.interlace_mode = current_info->interlace_mode;
-
-    GST_DEBUG_OBJECT (pad, "This pad will be converted from %d to %d",
-        GST_VIDEO_INFO_FORMAT (current_info),
-        GST_VIDEO_INFO_FORMAT (&tmp_info));
-
-    cpad->convert = gst_video_converter_new (current_info, &tmp_info, NULL);
-    cpad->conversion_info = tmp_info;
-    if (!cpad->convert) {
-      g_free (colorimetry);
-      g_free (best_colorimetry);
-      GST_WARNING_OBJECT (pad, "No path found for conversion");
-      return FALSE;
-    }
-  } else {
-    cpad->conversion_info = *current_info;
-    GST_DEBUG_OBJECT (pad, "This pad will not need conversion");
-  }
-  g_free (colorimetry);
-  g_free (best_colorimetry);
-
   return TRUE;
-}
-
-/* Test whether rectangle2 contains rectangle 1 (geometrically) */
-static gboolean
-is_rectangle_contained (GstVideoRectangle rect1, GstVideoRectangle rect2)
-{
-  if ((rect2.x <= rect1.x) && (rect2.y <= rect1.y) &&
-      ((rect2.x + rect2.w) >= (rect1.x + rect1.w)) &&
-      ((rect2.y + rect2.h) >= (rect1.y + rect1.h)))
-    return TRUE;
-  return FALSE;
-}
-
-static GstVideoRectangle
-clamp_rectangle (gint x, gint y, gint w, gint h, gint outer_width,
-    gint outer_height)
-{
-  gint x2 = x + w;
-  gint y2 = y + h;
-  GstVideoRectangle clamped;
-
-  /* Clamp the x/y coordinates of this frame to the output boundaries to cover
-   * the case where (say, with negative xpos/ypos or w/h greater than the output
-   * size) the non-obscured portion of the frame could be outside the bounds of
-   * the video itself and hence not visible at all */
-  clamped.x = CLAMP (x, 0, outer_width);
-  clamped.y = CLAMP (y, 0, outer_height);
-  clamped.w = CLAMP (x2, 0, outer_width) - clamped.x;
-  clamped.h = CLAMP (y2, 0, outer_height) - clamped.y;
-
-  return clamped;
 }
 
 static gboolean
 gst_v4l2_compositor_pad_prepare_frame (GstV4l2VideoAggregatorPad * pad,
     GstV4l2VideoAggregator * vagg)
 {
-  GstV4l2Compositor *comp = GST_V4L2_COMPOSITOR (vagg);
-  GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-  guint outsize;
-  GstVideoFrame *converted_frame;
-  GstBuffer *converted_buf = NULL;
-  GstVideoFrame *frame;
-  static GstAllocationParams params = { 0, 15, 0, 0, };
-  gint width, height;
-  gboolean frame_obscured = FALSE;
-  GList *l;
-  /* The rectangle representing this frame, clamped to the video's boundaries.
-   * Due to the clamping, this is different from the frame width/height above. */
-  GstVideoRectangle frame_rect;
-
-  GST_DEBUG_OBJECT (pad, "buffer is %p", pad->buffer);
-
-  if (!pad->buffer)
-    return TRUE;
-
-  /* There's three types of width/height here:
-   * 1. GST_VIDEO_FRAME_WIDTH/HEIGHT:
-   *     The frame width/height (same as pad->buffer_vinfo.height/width;
-   *     see gst_video_frame_map())
-   * 2. cpad->width/height:
-   *     The optional pad property for scaling the frame (if zero, the video is
-   *     left unscaled)
-   * 3. conversion_info.width/height:
-   *     Equal to cpad->width/height if it's set, otherwise it's the pad
-   *     width/height. See ->set_info()
-   * */
-
-  _mixer_pad_get_output_size (comp, cpad, &width, &height);
-
-  /* The only thing that can change here is the width
-   * and height, otherwise set_info would've been called */
-  if (GST_VIDEO_INFO_WIDTH (&cpad->conversion_info) != width ||
-      GST_VIDEO_INFO_HEIGHT (&cpad->conversion_info) != height) {
-    gchar *colorimetry, *wanted_colorimetry;
-    const gchar *chroma, *wanted_chroma;
-
-    /* We might end up with no converter afterwards if
-     * the only reason for conversion was a different
-     * width or height
-     */
-    if (cpad->convert)
-      gst_video_converter_free (cpad->convert);
-    cpad->convert = NULL;
-
-    colorimetry =
-        gst_video_colorimetry_to_string (&pad->buffer_vinfo.colorimetry);
-    chroma = gst_video_chroma_to_string (pad->buffer_vinfo.chroma_site);
-
-    wanted_colorimetry =
-        gst_video_colorimetry_to_string (&cpad->conversion_info.colorimetry);
-    wanted_chroma =
-        gst_video_chroma_to_string (cpad->conversion_info.chroma_site);
-
-    if (GST_VIDEO_INFO_FORMAT (&pad->buffer_vinfo) !=
-        GST_VIDEO_INFO_FORMAT (&cpad->conversion_info)
-        || g_strcmp0 (colorimetry, wanted_colorimetry)
-        || g_strcmp0 (chroma, wanted_chroma)
-        || width != GST_VIDEO_INFO_WIDTH (&pad->buffer_vinfo)
-        || height != GST_VIDEO_INFO_HEIGHT (&pad->buffer_vinfo)) {
-      GstVideoInfo tmp_info;
-
-      gst_video_info_set_format (&tmp_info, cpad->conversion_info.finfo->format,
-          width, height);
-      tmp_info.chroma_site = cpad->conversion_info.chroma_site;
-      tmp_info.colorimetry = cpad->conversion_info.colorimetry;
-      tmp_info.par_n = vagg->info.par_n;
-      tmp_info.par_d = vagg->info.par_d;
-      tmp_info.fps_n = cpad->conversion_info.fps_n;
-      tmp_info.fps_d = cpad->conversion_info.fps_d;
-      tmp_info.flags = cpad->conversion_info.flags;
-      tmp_info.interlace_mode = cpad->conversion_info.interlace_mode;
-
-      GST_DEBUG_OBJECT (pad, "This pad will be converted from %d to %d",
-          GST_VIDEO_INFO_FORMAT (&pad->buffer_vinfo),
-          GST_VIDEO_INFO_FORMAT (&tmp_info));
-
-      cpad->convert =
-          gst_video_converter_new (&pad->buffer_vinfo, &tmp_info, NULL);
-      cpad->conversion_info = tmp_info;
-
-      if (!cpad->convert) {
-        GST_WARNING_OBJECT (pad, "No path found for conversion");
-        g_free (colorimetry);
-        g_free (wanted_colorimetry);
-        return FALSE;
-      }
-    } else {
-      GST_VIDEO_INFO_WIDTH (&cpad->conversion_info) = width;
-      GST_VIDEO_INFO_HEIGHT (&cpad->conversion_info) = height;
-    }
-
-    g_free (colorimetry);
-    g_free (wanted_colorimetry);
-  }
-
-  frame_rect = clamp_rectangle (cpad->xpos, cpad->ypos, width, height,
-      GST_VIDEO_INFO_WIDTH (&vagg->info), GST_VIDEO_INFO_HEIGHT (&vagg->info));
-
-  if (frame_rect.w == 0 || frame_rect.h == 0) {
-    GST_DEBUG_OBJECT (vagg, "Resulting frame is zero-width or zero-height "
-        "(w: %i, h: %i), skipping", frame_rect.w, frame_rect.h);
-    converted_frame = NULL;
-    goto done;
-  }
-
-  GST_OBJECT_LOCK (vagg);
-  /* Check if this frame is obscured by a higher-zorder frame
-   * TODO: Also skip a frame if it's obscured by a combination of
-   * higher-zorder frames */
-  for (l = g_list_find (GST_ELEMENT (vagg)->sinkpads, pad)->next; l;
-      l = l->next) {
-    GstVideoRectangle frame2_rect;
-    GstV4l2VideoAggregatorPad *pad2 = l->data;
-    GstV4l2CompositorPad *cpad2 = GST_V4L2_COMPOSITOR_PAD (pad2);
-    gint pad2_width, pad2_height;
-
-    _mixer_pad_get_output_size (comp, cpad2, &pad2_width, &pad2_height);
-
-    /* We don't need to clamp the coords of the second rectangle */
-    frame2_rect.x = cpad2->xpos;
-    frame2_rect.y = cpad2->ypos;
-    /* This is effectively what set_info and the above conversion
-     * code do to calculate the desired width/height */
-    frame2_rect.w = pad2_width;
-    frame2_rect.h = pad2_height;
-
-    /* Check if there's a buffer to be aggregated, ensure it can't have an alpha
-     * channel, then check opacity and frame boundaries */
-    if (pad2->buffer && 
-        is_rectangle_contained (frame_rect, frame2_rect)) {
-      frame_obscured = TRUE;
-      GST_DEBUG_OBJECT (pad, "%ix%i@(%i,%i) obscured by %s %ix%i@(%i,%i) "
-          "in output of size %ix%i; skipping frame", frame_rect.w, frame_rect.h,
-          frame_rect.x, frame_rect.y, GST_PAD_NAME (pad2), frame2_rect.w,
-          frame2_rect.h, frame2_rect.x, frame2_rect.y,
-          GST_VIDEO_INFO_WIDTH (&vagg->info),
-          GST_VIDEO_INFO_HEIGHT (&vagg->info));
-      break;
-    }
-  }
-  GST_OBJECT_UNLOCK (vagg);
-
-  if (frame_obscured) {
-    converted_frame = NULL;
-    goto done;
-  }
-
-  frame = g_slice_new0 (GstVideoFrame);
-
-  if (!gst_video_frame_map (frame, &pad->buffer_vinfo, pad->buffer,
-          GST_MAP_READ)) {
-    GST_WARNING_OBJECT (vagg, "Could not map input buffer");
-    return FALSE;
-  }
-
-  if (cpad->convert) {
-    gint converted_size;
-
-    converted_frame = g_slice_new0 (GstVideoFrame);
-
-    /* We wait until here to set the conversion infos, in case vagg->info changed */
-    converted_size = GST_VIDEO_INFO_SIZE (&cpad->conversion_info);
-    outsize = GST_VIDEO_INFO_SIZE (&vagg->info);
-    converted_size = converted_size > outsize ? converted_size : outsize;
-    converted_buf = gst_buffer_new_allocate (NULL, converted_size, &params);
-
-    if (!gst_video_frame_map (converted_frame, &(cpad->conversion_info),
-            converted_buf, GST_MAP_READWRITE)) {
-      GST_WARNING_OBJECT (vagg, "Could not map converted frame");
-
-      g_slice_free (GstVideoFrame, converted_frame);
-      gst_video_frame_unmap (frame);
-      g_slice_free (GstVideoFrame, frame);
-      return FALSE;
-    }
-
-    gst_video_converter_frame (cpad->convert, frame, converted_frame);
-    cpad->converted_buffer = converted_buf;
-    gst_video_frame_unmap (frame);
-    g_slice_free (GstVideoFrame, frame);
-  } else {
-    converted_frame = frame;
-  }
-
-done:
-  pad->aggregated_frame = converted_frame;
-
   return TRUE;
 }
 
@@ -470,18 +180,6 @@ static void
 gst_v4l2_compositor_pad_clean_frame (GstV4l2VideoAggregatorPad * pad,
     GstV4l2VideoAggregator * vagg)
 {
-  GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-
-  if (pad->aggregated_frame) {
-    gst_video_frame_unmap (pad->aggregated_frame);
-    g_slice_free (GstVideoFrame, pad->aggregated_frame);
-    pad->aggregated_frame = NULL;
-  }
-
-  if (cpad->converted_buffer) {
-    gst_buffer_unref (cpad->converted_buffer);
-    cpad->converted_buffer = NULL;
-  }
 }
 
 static void
@@ -641,13 +339,105 @@ gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
   return ret;
 }
 
+#define UNSET_QUEUED(buffer) \
+    ((buffer).flags &= ~(V4L2_BUF_FLAG_QUEUED | V4L2_BUF_FLAG_DONE))
+
+#define SET_QUEUED(buffer) ((buffer).flags |= V4L2_BUF_FLAG_QUEUED)
+
+#define IS_QUEUED(buffer) \
+    ((buffer).flags & (V4L2_BUF_FLAG_QUEUED | V4L2_BUF_FLAG_DONE))
+
 static GstFlowReturn
-gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2CompositorPad * cpad,
+gst_v4l2_compositor_qbuf (GstV4l2Object * obj, GstBuffer * buf)
+{
+  GstV4l2MemoryGroup *group = NULL;
+  GstClockTime timestamp;
+  gint index;
+  gint i;
+  GstFlowReturn ret = GST_FLOW_OK;
+
+  if (!gst_v4l2_is_buffer_valid (buf, &group)) {
+    GST_LOG_OBJECT (obj, "unref copied/invalid buffer %p", buf);
+    gst_buffer_unref (buf);
+    return GST_FLOW_OK;
+  }
+
+  GST_LOG_OBJECT (obj, "queuing buffer");
+
+  if (V4L2_TYPE_IS_OUTPUT (obj->type)) {
+    enum v4l2_field field;
+
+    /* Except when field is set to alternate, buffer field is the same as
+     * the one defined in format */
+    if (V4L2_TYPE_IS_MULTIPLANAR (obj->type))
+      field = obj->format.fmt.pix_mp.field;
+    else
+      field = obj->format.fmt.pix.field;
+
+    /* NB: At this moment, we can't have alternate mode because it not handled
+     * yet */
+    if (field == V4L2_FIELD_ALTERNATE) {
+      if (GST_BUFFER_FLAG_IS_SET (buf, GST_VIDEO_FRAME_FLAG_TFF))
+        field = V4L2_FIELD_TOP;
+      else
+        field = V4L2_FIELD_BOTTOM;
+    }
+
+    group->buffer.field = field;
+  }
+
+  if (GST_BUFFER_TIMESTAMP_IS_VALID (buf)) {
+    timestamp = GST_BUFFER_TIMESTAMP (buf);
+    GST_TIME_TO_TIMEVAL (timestamp, group->buffer.timestamp);
+  }
+
+  /* update sizes */
+  if (V4L2_TYPE_IS_MULTIPLANAR (obj->type)) {
+    for (i = 0; i < group->n_mem; i++)
+      group->planes[i].bytesused =
+          gst_memory_get_sizes (group->mem[i], NULL, NULL);
+  } else {
+    group->buffer.bytesused = gst_memory_get_sizes (group->mem[0], NULL, NULL);
+  }
+  
+  GST_DEBUG_OBJECT (obj, "video_fd=%d", obj->video_fd);
+
+  if (v4l2_ioctl (obj->video_fd, VIDIOC_QBUF, &group->buffer) < 0) {
+    ret = GST_FLOW_ERROR;
+    GST_ERROR_OBJECT (obj, "failed queing buffer %i: %s",
+        group->buffer.index, g_strerror (errno));
+
+    if (IS_QUEUED (group->buffer)) {
+      GST_DEBUG_OBJECT (obj,
+          "driver pretends buffer is queued even if queue failed");
+      UNSET_QUEUED (group->buffer);
+    }
+    goto done;
+  }
+
+  GST_LOG_OBJECT (obj, "queued buffer %i (flags 0x%X)",
+      group->buffer.index, group->buffer.flags);
+
+  if (!IS_QUEUED (group->buffer)) {
+    GST_DEBUG_OBJECT (obj,
+        "driver pretends buffer is not queued even if queue succeeded");
+    SET_QUEUED (group->buffer);
+  }
+
+  /* Ensure the memory will stay around and is RO */
+  for (i = 0; i < group->n_mem; i++)
+    gst_memory_ref (group->mem[i]);
+
+done:
+  return ret;
+}
+
+static GstFlowReturn
+gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2Compositor * comp, GstV4l2CompositorPad * cpad,
     GstBuffer * inbuf, GstBuffer ** outbuf)
 {
-  GstV4l2M2m * m2m = cpad->m2m;
-  GstBufferPool *output_pool = GST_BUFFER_POOL (m2m->v4l2output->pool);
-  GstBufferPool *capture_pool = GST_BUFFER_POOL (m2m->v4l2capture->pool);
+  GstBufferPool *output_pool = GST_BUFFER_POOL (cpad->m2m->v4l2output->pool);
+  GstBufferPool *capture_pool = GST_BUFFER_POOL (cpad->m2m->v4l2capture->pool);
   GstFlowReturn ret = GST_FLOW_OK;
 
   if (inbuf == NULL) {
@@ -658,12 +448,12 @@ gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2CompositorPad * cpad,
   /* Ensure input internal pool is active */
   if (!gst_buffer_pool_is_active (output_pool)) {
     GstStructure *config = gst_buffer_pool_get_config (output_pool);
-    gint min = m2m->v4l2output->min_buffers == 0 ? GST_V4L2_MIN_BUFFERS :
-        m2m->v4l2output->min_buffers;
+    gint min = cpad->m2m->v4l2output->min_buffers == 0 ? GST_V4L2_MIN_BUFFERS :
+        cpad->m2m->v4l2output->min_buffers;
 
     GstCaps * incaps = gst_pad_get_current_caps (GST_PAD (cpad));
     gst_buffer_pool_config_set_params (config, incaps,
-        m2m->v4l2output->info.size, min, min);
+        cpad->m2m->v4l2output->info.size, min, min);
     gst_caps_unref (incaps);
 
     /* There is no reason to refuse this config */
@@ -682,11 +472,11 @@ gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2CompositorPad * cpad,
 
   if (*outbuf == NULL) {
     do {
-      if (!gst_buffer_pool_set_active (capture_pool, TRUE))
+      if (!gst_buffer_pool_set_active (cpad->peer_pool, TRUE))
         goto activate_failed;
 
-      GST_DEBUG_OBJECT (cpad, "Dequeue capture buffer");
-      ret = gst_buffer_pool_acquire_buffer (capture_pool, outbuf, NULL);
+      GST_DEBUG_OBJECT (cpad, "Dequeue capture buffer, first buffer");
+      ret = gst_buffer_pool_acquire_buffer (cpad->peer_pool, outbuf, NULL);
       if (ret != GST_FLOW_OK)
         goto alloc_failed;
 
@@ -697,25 +487,42 @@ gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2CompositorPad * cpad,
   else {
     /* Already have an output buffer, do not use bufferpool */
     do {
-      if (!gst_buffer_pool_set_active (capture_pool, TRUE))
+/*      GstBuffer * buf;*/
+/*      GstV4l2MemoryGroup *group = NULL;*/
+/*      GstV4l2MemoryGroup *outgroup = NULL;*/
+
+      if (!gst_buffer_pool_set_active (cpad->peer_pool, TRUE))
         goto activate_failed;
 
-      GST_DEBUG_OBJECT (cpad, "Queuing again, already existing capture buffer");
-      ret = gst_v4l2_buffer_pool_qbuf (capture_pool, *outbuf);
-      if (ret != GST_FLOW_OK)
-        goto alloc_failed;
-      
-      GST_DEBUG_OBJECT (cpad, "Dequeue capture buffer");
-      ret = gst_v4l2_buffer_pool_dqbuf (capture_pool, outbuf);
-      if (ret != GST_FLOW_OK)
-        goto alloc_failed;
+/*      GST_DEBUG_OBJECT (cpad, "Dequeue capture buffer");*/
+/*      ret = gst_buffer_pool_acquire_buffer (capture_pool, &buf, NULL);*/
+/*      if (ret != GST_FLOW_OK)*/
+/*        goto alloc_failed;*/
 
-//      ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf);
+/*      if (!gst_v4l2_is_buffer_valid (*outbuf, &outgroup)) {*/
+/*        GST_LOG_OBJECT (cpad, "unref copied/invalid buffer %p", *outbuf);*/
+/*        return GST_FLOW_ERROR;*/
+/*      }*/
+
+/*      if (!gst_v4l2_is_buffer_valid (buf, &group)) {*/
+/*        GST_LOG_OBJECT (cpad, "unref copied/invalid buffer %p", buf);*/
+/*        gst_buffer_unref (buf);*/
+/*        return GST_FLOW_ERROR;*/
+/*      }*/
+
+/*      gint fd_saved = group->buffer.m.fd;*/
+/*      group->buffer.m.fd = outgroup->buffer.m.fd;*/
+
+      ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf);
+
+/*      group->buffer.m.fd = fd_saved;*/
+/*      gst_buffer_unref (buf);*/
 
     } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
   }
 
 beach:
+  GST_DEBUG_OBJECT (cpad, "Returning outbuf=%p *outbuf=%p", outbuf, *outbuf);
   return ret;
 
 activate_failed:
@@ -745,9 +552,15 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
     GstV4l2VideoAggregatorPad *pad = l->data;
     GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
-    gst_v4l2_compositor_pad_prepare_output_buffer (cpad, pad->buffer, &midbuf);
+    gst_v4l2_compositor_pad_prepare_output_buffer (self, cpad, pad->buffer, &midbuf);
+    GST_DEBUG_OBJECT (self, "Pad returned midbuf=%p", midbuf);
   }
   GST_OBJECT_UNLOCK (vagg);
+
+  if (midbuf == NULL) {
+    GST_DEBUG_OBJECT (self, "Pads did not produced any buffer");
+    goto beach;
+  }
 
   /* Ensure input internal pool is active */
   if (!gst_buffer_pool_is_active (output_pool)) {
@@ -885,17 +698,24 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
 
   /* Negotiate allocation between internal m2m and first pad m2m */
   GST_OBJECT_LOCK (vagg);
-  GstPad *pad = GST_ELEMENT (vagg)->sinkpads->data;
-  GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    GstPad *pad = l->data;
+    GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
-  query = gst_query_new_allocation (caps, TRUE);
-  gst_v4l2_object_propose_allocation (self->m2m->v4l2output, query);
+    query = gst_query_new_allocation (caps, TRUE);
+    gst_v4l2_object_propose_allocation (self->m2m->v4l2output, query);
 
-  if (gst_v4l2_object_decide_allocation (cpad->m2m->v4l2capture, query)) {
-    GstBufferPool *pool = GST_BUFFER_POOL (cpad->m2m->v4l2capture->pool);
+    if (gst_v4l2_object_decide_allocation (cpad->m2m->v4l2capture, query)) {
+      GstBufferPool *peer_pool = NULL;
 
-    if (!gst_buffer_pool_set_active (pool, TRUE))
-      goto pad_activate_failed;
+      if (gst_query_get_n_allocation_pools (query) > 0)
+        gst_query_parse_nth_allocation_pool (query, 0, &peer_pool, NULL, NULL, NULL);
+
+      cpad->peer_pool = peer_pool;
+
+      if (!gst_buffer_pool_set_active (cpad->m2m->v4l2capture->pool, TRUE))
+        goto pad_activate_failed;
+    }
   }
   GST_OBJECT_UNLOCK (vagg);
 

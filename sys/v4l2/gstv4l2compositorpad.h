@@ -54,6 +54,7 @@ struct _GstV4l2CompositorPad
   gint width, height;
 
   GstV4l2M2m *m2m;
+  GstBufferPool *peer_pool;
 
   GstVideoConverter *convert;
   GstVideoInfo conversion_info;
