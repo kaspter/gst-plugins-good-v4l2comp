@@ -1824,7 +1824,7 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
           /* Replace our buffer with downstream allocated buffer */
           tmp = gst_mini_object_steal_qdata (GST_MINI_OBJECT (*buf),
               GST_V4L2_IMPORT_QUARK);
-          GST_DEBUG ("trace");
+          GST_DEBUG ("trace buf=%p, tmp=%p", *buf, tmp);
           gst_buffer_replace (buf, tmp);
           GST_DEBUG ("trace");
           gst_buffer_unref (tmp);

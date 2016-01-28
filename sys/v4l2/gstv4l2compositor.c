@@ -434,7 +434,7 @@ done:
 
 static GstFlowReturn
 gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2Compositor * comp, GstV4l2CompositorPad * cpad,
-    GstBuffer * inbuf, GstBuffer ** outbuf)
+    GstBuffer * inbuf, GstBuffer ** midbuf, GstBuffer ** outbuf)
 {
   GstBufferPool *output_pool = GST_BUFFER_POOL (cpad->m2m->v4l2output->pool);
   GstBufferPool *capture_pool = GST_BUFFER_POOL (cpad->m2m->v4l2capture->pool);
@@ -470,56 +470,26 @@ gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2Compositor * comp, GstV4l2
   if (G_UNLIKELY (ret != GST_FLOW_OK))
     goto beach;
 
-  if (*outbuf == NULL) {
-    do {
-      if (!gst_buffer_pool_set_active (cpad->peer_pool, TRUE))
-        goto activate_failed;
+  do {
+    if (!gst_buffer_pool_set_active (cpad->peer_pool, TRUE))
+      goto activate_failed;
 
-      GST_DEBUG_OBJECT (cpad, "Dequeue capture buffer, first buffer");
-      ret = gst_buffer_pool_acquire_buffer (cpad->peer_pool, outbuf, NULL);
+    GST_DEBUG_OBJECT (cpad, "Dequeue capture buffer");
+    if (*midbuf == NULL) {
+      ret = gst_buffer_pool_acquire_buffer (cpad->peer_pool, midbuf, NULL);
       if (ret != GST_FLOW_OK)
         goto alloc_failed;
+    }
 
-      ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf);
+    if (*outbuf != NULL) {
+      gst_buffer_unref (*outbuf);
+    }
 
-    } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
-  }
-  else {
-    /* Already have an output buffer, do not use bufferpool */
-    do {
-/*      GstBuffer * buf;*/
-/*      GstV4l2MemoryGroup *group = NULL;*/
-/*      GstV4l2MemoryGroup *outgroup = NULL;*/
+    *outbuf = gst_buffer_ref (*midbuf);
+    GST_DEBUG_OBJECT (cpad, "midbuf=%p, outbuf=%p", *midbuf, *outbuf);
+    ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf);
 
-      if (!gst_buffer_pool_set_active (cpad->peer_pool, TRUE))
-        goto activate_failed;
-
-/*      GST_DEBUG_OBJECT (cpad, "Dequeue capture buffer");*/
-/*      ret = gst_buffer_pool_acquire_buffer (capture_pool, &buf, NULL);*/
-/*      if (ret != GST_FLOW_OK)*/
-/*        goto alloc_failed;*/
-
-/*      if (!gst_v4l2_is_buffer_valid (*outbuf, &outgroup)) {*/
-/*        GST_LOG_OBJECT (cpad, "unref copied/invalid buffer %p", *outbuf);*/
-/*        return GST_FLOW_ERROR;*/
-/*      }*/
-
-/*      if (!gst_v4l2_is_buffer_valid (buf, &group)) {*/
-/*        GST_LOG_OBJECT (cpad, "unref copied/invalid buffer %p", buf);*/
-/*        gst_buffer_unref (buf);*/
-/*        return GST_FLOW_ERROR;*/
-/*      }*/
-
-/*      gint fd_saved = group->buffer.m.fd;*/
-/*      group->buffer.m.fd = outgroup->buffer.m.fd;*/
-
-      ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf);
-
-/*      group->buffer.m.fd = fd_saved;*/
-/*      gst_buffer_unref (buf);*/
-
-    } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
-  }
+  } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
 
 beach:
   GST_DEBUG_OBJECT (cpad, "Returning outbuf=%p *outbuf=%p", outbuf, *outbuf);
@@ -544,6 +514,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
   GstBufferPool *capture_pool = GST_BUFFER_POOL (m2m->v4l2capture->pool);
   GstFlowReturn ret = GST_FLOW_OK;
   GstBuffer * midbuf = NULL;
+  GstBuffer * buf = NULL;
 
   GST_DEBUG_OBJECT (self, "Producing output buffer");
 
@@ -552,10 +523,12 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
     GstV4l2VideoAggregatorPad *pad = l->data;
     GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
-    gst_v4l2_compositor_pad_prepare_output_buffer (self, cpad, pad->buffer, &midbuf);
-    GST_DEBUG_OBJECT (self, "Pad returned midbuf=%p", midbuf);
+    gst_v4l2_compositor_pad_prepare_output_buffer (self, cpad, pad->buffer, &buf, &midbuf);
+    GST_DEBUG_OBJECT (self, "Pad returned buf=%p, midbuf=%p", buf, midbuf);
   }
   GST_OBJECT_UNLOCK (vagg);
+  
+  gst_buffer_unref (buf);
 
   if (midbuf == NULL) {
     GST_DEBUG_OBJECT (self, "Pads did not produced any buffer");
