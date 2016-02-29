@@ -49,6 +49,7 @@
 #include "gstv4l2videodec.h"
 #include "gstv4l2deviceprovider.h"
 #include "gstv4l2transform.h"
+#include "gstv4l2compositor.h"
 
 /* used in v4l2_calls.c and v4l2src_calls.c */
 GST_DEBUG_CATEGORY (v4l2_debug);
@@ -223,6 +224,8 @@ plugin_init (GstPlugin * plugin)
           GST_TYPE_V4L2RADIO) ||
       !gst_element_register (plugin, "v4l2convert", GST_RANK_NONE,
           GST_TYPE_V4L2_TRANSFORM) ||
+      !gst_element_register (plugin, "v4l2compositor", GST_RANK_NONE,
+          GST_TYPE_V4L2_COMPOSITOR) ||
       !gst_device_provider_register (plugin, "v4l2deviceprovider",
           GST_RANK_PRIMARY, GST_TYPE_V4L2_DEVICE_PROVIDER)
       /* etc. */

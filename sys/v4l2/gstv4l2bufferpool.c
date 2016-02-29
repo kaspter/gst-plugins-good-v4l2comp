@@ -69,7 +69,7 @@ enum _GstV4l2BufferPoolAcquireFlags
 static void gst_v4l2_buffer_pool_release_buffer (GstBufferPool * bpool,
     GstBuffer * buffer);
 
-static gboolean
+gboolean
 gst_v4l2_is_buffer_valid (GstBuffer * buffer, GstV4l2MemoryGroup ** out_group)
 {
   GstMemory *mem = gst_buffer_peek_memory (buffer, 0);
@@ -329,7 +329,7 @@ gst_v4l2_buffer_pool_import_dmabuf (GstV4l2BufferPool * pool,
   guint n_mem = gst_buffer_n_memory (src);
   gint i;
 
-  GST_LOG_OBJECT (pool, "importing dmabuf");
+  GST_LOG_OBJECT (pool, "importing dmabuf src=%p", src);
 
   if (!gst_v4l2_is_buffer_valid (dest, &group))
     goto not_our_buffer;
@@ -893,6 +893,7 @@ gst_v4l2_buffer_pool_stop (GstBufferPool * bpool)
 
       pool->buffers[i] = NULL;
 
+      GST_DEBUG ("trace");
       if (V4L2_TYPE_IS_OUTPUT (pool->obj->type))
         gst_v4l2_buffer_pool_release_buffer (bpool, buffer);
       else                      /* Don't re-enqueue capture buffer on stop */
@@ -976,6 +977,7 @@ gst_v4l2_buffer_pool_flush_stop (GstBufferPool * bpool)
           gst_mini_object_set_qdata (GST_MINI_OBJECT (buffer),
               GST_V4L2_IMPORT_QUARK, NULL, NULL);
 
+          GST_DEBUG ("trace");
           if (buffer->pool == NULL)
             gst_v4l2_buffer_pool_release_buffer (bpool, buffer);
 
@@ -1057,7 +1059,7 @@ select_error:
   }
 }
 
-static GstFlowReturn
+GstFlowReturn
 gst_v4l2_buffer_pool_qbuf (GstV4l2BufferPool * pool, GstBuffer * buf)
 {
   GstV4l2MemoryGroup *group = NULL;
@@ -1134,7 +1136,7 @@ queue_failed:
   }
 }
 
-static GstFlowReturn
+GstFlowReturn
 gst_v4l2_buffer_pool_dqbuf (GstV4l2BufferPool * pool, GstBuffer ** buffer)
 {
   GstFlowReturn res;
@@ -1571,7 +1573,7 @@ gst_v4l2_buffer_pool_new (GstV4l2Object * obj, GstCaps * caps)
     goto dup_failed;
 
   /* setting a significant unique name */
-  parent_name = gst_object_get_name (GST_OBJECT (obj->element));
+  parent_name = g_strdup (GST_OBJECT_NAME (GST_OBJECT (obj->element)));
   name = g_strconcat (parent_name, ":", "pool:",
       V4L2_TYPE_IS_OUTPUT (obj->type) ? "sink" : "src", NULL);
   g_free (parent_name);
@@ -1701,13 +1703,15 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
   GstBufferPool *bpool = GST_BUFFER_POOL_CAST (pool);
   GstV4l2Object *obj = pool->obj;
 
-  GST_DEBUG_OBJECT (pool, "process buffer %p", buf);
+  GST_DEBUG_OBJECT (pool, "process buffer buf=%p *buf=%p", buf, *buf);
 
   g_return_val_if_fail (gst_buffer_pool_is_active (bpool), GST_FLOW_ERROR);
 
+  GST_DEBUG ("trace");
   if (GST_BUFFER_POOL_IS_FLUSHING (pool))
     return GST_FLOW_FLUSHING;
 
+  GST_DEBUG ("trace");
   switch (obj->type) {
     case V4L2_BUF_TYPE_VIDEO_CAPTURE:
     case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
@@ -1780,6 +1784,7 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
             gboolean corrupted = GST_BUFFER_FLAG_IS_SET (tmp,
                 GST_BUFFER_FLAG_CORRUPTED);
 
+            GST_DEBUG ("trace");
             gst_v4l2_buffer_pool_release_buffer (bpool, tmp);
 
             if (corrupted)
@@ -1791,6 +1796,7 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
           ret = gst_v4l2_buffer_pool_copy_buffer (pool, *buf, tmp);
 
           /* an queue the buffer again after the copy */
+          GST_DEBUG ("trace");
           gst_v4l2_buffer_pool_release_buffer (bpool, tmp);
 
           if (ret != GST_FLOW_OK)
@@ -1814,11 +1820,15 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
         {
           GstBuffer *tmp;
 
+          GST_DEBUG ("trace");
           /* Replace our buffer with downstream allocated buffer */
           tmp = gst_mini_object_steal_qdata (GST_MINI_OBJECT (*buf),
               GST_V4L2_IMPORT_QUARK);
+          GST_DEBUG ("trace buf=%p, tmp=%p", *buf, tmp);
           gst_buffer_replace (buf, tmp);
+          GST_DEBUG ("trace");
           gst_buffer_unref (tmp);
+          GST_DEBUG ("trace");
           break;
         }
 
@@ -1846,14 +1856,18 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
           GstV4l2MemoryGroup *group;
           gint index;
 
+  GST_DEBUG ("trace");
           if ((*buf)->pool != bpool)
             goto copying;
 
+  GST_DEBUG ("trace");
           if (!gst_v4l2_is_buffer_valid (*buf, &group))
             goto copying;
 
+  GST_DEBUG ("trace");
           index = group->buffer.index;
 
+  GST_DEBUG ("trace");
           GST_LOG_OBJECT (pool, "processing buffer %i from our pool", index);
 
           index = group->buffer.index;
@@ -1922,6 +1936,7 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
             if (ret == GST_FLOW_OK && out->pool == NULL)
               /* release the rendered buffer back into the pool. This wakes up any
                * thread waiting for a buffer in _acquire(). */
+              GST_DEBUG ("trace");
               gst_v4l2_buffer_pool_release_buffer (bpool, out);
           }
           break;
@@ -1935,6 +1950,7 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
       g_assert_not_reached ();
       break;
   }
+  GST_DEBUG ("trace");
 done:
   return ret;
 

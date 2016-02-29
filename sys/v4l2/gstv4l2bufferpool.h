@@ -110,6 +110,10 @@ void                gst_v4l2_buffer_pool_set_other_pool (GstV4l2BufferPool * poo
 void                gst_v4l2_buffer_pool_copy_at_threshold (GstV4l2BufferPool * pool,
                                                             gboolean copy);
 
+GstFlowReturn       gst_v4l2_buffer_pool_qbuf (GstV4l2BufferPool * pool, GstBuffer * buf);
+GstFlowReturn       gst_v4l2_buffer_pool_dqbuf (GstV4l2BufferPool * pool, GstBuffer ** buffer);
+gboolean            gst_v4l2_is_buffer_valid (GstBuffer * buffer, GstV4l2MemoryGroup ** out_group);
+
 G_END_DECLS
 
 #endif /*__GST_V4L2_BUFFER_POOL_H__ */
