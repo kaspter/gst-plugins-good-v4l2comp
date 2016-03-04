@@ -123,12 +123,12 @@ gst_v4l2_buffer_pool_copy_buffer (GstV4l2BufferPool * pool, GstBuffer * dest,
 
     /* we have raw video, use videoframe copy to get strides right */
     if (!gst_video_frame_map (&src_frame, &pool->caps_info, src, GST_MAP_READ))
-      goto invalid_buffer;
+      goto invalid_bufferA;
 
     if (!gst_video_frame_map (&dest_frame, &pool->caps_info, dest,
             GST_MAP_WRITE)) {
       gst_video_frame_unmap (&src_frame);
-      goto invalid_buffer;
+      goto invalid_bufferB;
     }
 
     gst_video_frame_copy (&dest_frame, &src_frame);
@@ -141,7 +141,7 @@ gst_v4l2_buffer_pool_copy_buffer (GstV4l2BufferPool * pool, GstBuffer * dest,
     GST_DEBUG_OBJECT (pool, "copy raw bytes");
 
     if (!gst_buffer_map (src, &map, GST_MAP_READ))
-      goto invalid_buffer;
+      goto invalid_bufferC;
 
     gst_buffer_fill (dest, 0, map.data, gst_buffer_get_size (src));
 
@@ -157,10 +157,22 @@ gst_v4l2_buffer_pool_copy_buffer (GstV4l2BufferPool * pool, GstBuffer * dest,
 
   return GST_FLOW_OK;
 
-invalid_buffer:
+invalid_bufferA:
   {
-    GST_ERROR_OBJECT (pool, "could not map buffer");
-    return GST_FLOW_ERROR;
+    GST_ERROR_OBJECT (pool, "could not map buffer [GST_MAP_READ] buf=%p", src);
+	return GST_FLOW_ERROR;
+  }
+
+invalid_bufferB:
+  {
+    GST_ERROR_OBJECT (pool, "could not map buffer [GST_MAP_WRITE] buf=%p refcount=%d", dest, ((GstMiniObject *)dest)->refcount);
+	return GST_FLOW_ERROR;
+  }
+
+invalid_bufferC:
+  {
+	GST_ERROR_OBJECT (pool, "could not map buffer [GST_MAP_READ] buf=%p", src);
+	return GST_FLOW_ERROR;
   }
 }
 
