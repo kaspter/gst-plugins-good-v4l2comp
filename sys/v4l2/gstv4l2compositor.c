@@ -529,8 +529,8 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
     GST_DEBUG_OBJECT (self, "Pad returned buf=%p, midbuf=%p", buf, midbuf);
   }
   GST_OBJECT_UNLOCK (vagg);
-  
-  gst_buffer_unref (buf);
+
+  //gst_buffer_unref (buf);
 
   if (midbuf == NULL) {
     GST_DEBUG_OBJECT (self, "Pads did not produced any buffer");
@@ -579,7 +579,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
     *outbuf = NULL;
   }
 
-  GST_OBJECT_UNLOCK (vagg);
+  //GST_OBJECT_UNLOCK (vagg);
   return ret;
 
 beach:
