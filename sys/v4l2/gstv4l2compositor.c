@@ -919,8 +919,8 @@ gst_v4l2_compositor_create_new_pad (GstV4l2Aggregator * agg,
   cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 //  cpad->m2m->v4l2output->videodev = g_strdup (self->m2m->v4l2output->videodev);
   cpad->m2m->v4l2output->videodev = g_strdup ("/dev/v4l/by-path/ipu1-scaler");
-  cpad->m2m->v4l2output->req_mode = GST_V4L2_IO_DMABUF_IMPORT;
-  cpad->m2m->v4l2capture->req_mode = GST_V4L2_IO_DMABUF_IMPORT;
+  cpad->m2m->v4l2output->req_mode = GST_V4L2_IO_MMAP;
+  cpad->m2m->v4l2capture->req_mode = GST_V4L2_IO_MMAP;
   cpad->m2m->v4l2output->element = (GstElement *)self;
   cpad->m2m->v4l2capture->element = (GstElement *)self;
 

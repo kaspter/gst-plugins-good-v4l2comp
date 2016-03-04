@@ -2754,8 +2754,10 @@ gst_v4l2_object_setup_pool (GstV4l2Object * v4l2object, GstCaps * caps)
     goto method_not_supported;
 
   if (v4l2object->vcap.capabilities & V4L2_CAP_STREAMING) {
-    if (v4l2object->req_mode == GST_V4L2_IO_AUTO)
+    if (v4l2object->req_mode == GST_V4L2_IO_AUTO) {
       mode = GST_V4L2_IO_MMAP;
+	  //mode = GST_V4L2_IO_DMABUF;
+	}
   } else if (v4l2object->req_mode == GST_V4L2_IO_MMAP)
     goto method_not_supported;
 
