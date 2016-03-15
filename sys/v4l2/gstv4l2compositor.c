@@ -339,345 +339,75 @@ gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
   return ret;
 }
 
-#define UNSET_QUEUED(buffer) \
-    ((buffer).flags &= ~(V4L2_BUF_FLAG_QUEUED | V4L2_BUF_FLAG_DONE))
-
-#define SET_QUEUED(buffer) ((buffer).flags |= V4L2_BUF_FLAG_QUEUED)
-
-#define IS_QUEUED(buffer) \
-    ((buffer).flags & (V4L2_BUF_FLAG_QUEUED | V4L2_BUF_FLAG_DONE))
-
-#if 0
-static GstFlowReturn
-gst_v4l2_compositor_qbuf (GstV4l2Object * obj, GstBuffer * buf)
-{
-  GstV4l2MemoryGroup *group = NULL;
-  GstClockTime timestamp;
-  gint i;
-  GstFlowReturn ret = GST_FLOW_OK;
-
-  if (!gst_v4l2_is_buffer_valid (buf, &group)) {
-    GST_LOG_OBJECT (obj, "unref copied/invalid buffer %p", buf);
-    gst_buffer_unref (buf);
-    return GST_FLOW_OK;
-  }
-
-  GST_LOG_OBJECT (obj, "queuing buffer");
-
-  if (V4L2_TYPE_IS_OUTPUT (obj->type)) {
-    enum v4l2_field field;
-
-    /* Except when field is set to alternate, buffer field is the same as
-     * the one defined in format */
-    if (V4L2_TYPE_IS_MULTIPLANAR (obj->type))
-      field = obj->format.fmt.pix_mp.field;
-    else
-      field = obj->format.fmt.pix.field;
-
-    /* NB: At this moment, we can't have alternate mode because it not handled
-     * yet */
-    if (field == V4L2_FIELD_ALTERNATE) {
-      if (GST_BUFFER_FLAG_IS_SET (buf, GST_VIDEO_FRAME_FLAG_TFF))
-        field = V4L2_FIELD_TOP;
-      else
-        field = V4L2_FIELD_BOTTOM;
-    }
-
-    group->buffer.field = field;
-  }
-
-  if (GST_BUFFER_TIMESTAMP_IS_VALID (buf)) {
-    timestamp = GST_BUFFER_TIMESTAMP (buf);
-    GST_TIME_TO_TIMEVAL (timestamp, group->buffer.timestamp);
-  }
-
-  /* update sizes */
-  if (V4L2_TYPE_IS_MULTIPLANAR (obj->type)) {
-    for (i = 0; i < group->n_mem; i++)
-      group->planes[i].bytesused =
-          gst_memory_get_sizes (group->mem[i], NULL, NULL);
-  } else {
-    group->buffer.bytesused = gst_memory_get_sizes (group->mem[0], NULL, NULL);
-  }
-
-  GST_DEBUG_OBJECT (obj, "video_fd=%d", obj->video_fd);
-
-  if (v4l2_ioctl (obj->video_fd, VIDIOC_QBUF, &group->buffer) < 0) {
-    ret = GST_FLOW_ERROR;
-    GST_ERROR_OBJECT (obj, "failed queing buffer %i: %s",
-        group->buffer.index, g_strerror (errno));
-
-    if (IS_QUEUED (group->buffer)) {
-      GST_DEBUG_OBJECT (obj,
-          "driver pretends buffer is queued even if queue failed");
-      UNSET_QUEUED (group->buffer);
-    }
-    goto done;
-  }
-
-  GST_LOG_OBJECT (obj, "queued buffer %i (flags 0x%X)",
-      group->buffer.index, group->buffer.flags);
-
-  if (!IS_QUEUED (group->buffer)) {
-    GST_DEBUG_OBJECT (obj,
-        "driver pretends buffer is not queued even if queue succeeded");
-    SET_QUEUED (group->buffer);
-  }
-
-  /* Ensure the memory will stay around and is RO */
-  for (i = 0; i < group->n_mem; i++)
-    gst_memory_ref (group->mem[i]);
-
-done:
-  return ret;
-}
-#endif
-
-#if 0
-static GstFlowReturn
-gst_v4l2_compositor_pad_prepare_output_buffer (GstV4l2Compositor * comp, GstV4l2CompositorPad * cpad,
-    GstBuffer * inbuf, GstBuffer ** midbuf, GstBuffer ** outbuf)
-{
-  GstBufferPool *output_pool = GST_BUFFER_POOL (cpad->m2m->v4l2output->pool);
-  GstBufferPool *capture_pool = GST_BUFFER_POOL (cpad->m2m->v4l2capture->pool);
-  GstFlowReturn ret = GST_FLOW_OK;
-
-  if (inbuf == NULL) {
-    GST_WARNING_OBJECT (cpad, "Input buffer is NULL");
-    return GST_FLOW_ERROR;
-  }
-
-  /* Ensure input internal pool is active */
-  if (!gst_buffer_pool_is_active (output_pool)) {
-    GstStructure *config = gst_buffer_pool_get_config (output_pool);
-    gint min = cpad->m2m->v4l2output->min_buffers == 0 ? GST_V4L2_MIN_BUFFERS :
-        cpad->m2m->v4l2output->min_buffers;
-
-    GstCaps * incaps = gst_pad_get_current_caps (GST_PAD (cpad));
-    gst_buffer_pool_config_set_params (config, incaps,
-        cpad->m2m->v4l2output->info.size, min, min);
-    gst_caps_unref (incaps);
-
-    /* There is no reason to refuse this config */
-    if (!gst_buffer_pool_set_config (output_pool, config))
-      goto activate_failed;
-
-    if (!gst_buffer_pool_set_active (output_pool, TRUE))
-      goto activate_failed;
-  }
-
-  GST_DEBUG_OBJECT (cpad, "Queue input buffer");
-  ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (output_pool),
-      &inbuf);
-  if (G_UNLIKELY (ret != GST_FLOW_OK))
-    goto beach;
-
-  do {
-    if (!gst_buffer_pool_set_active (cpad->peer_pool, TRUE))
-      goto activate_failed;
-
-    GST_DEBUG_OBJECT (cpad, "Dequeue capture buffer");
-    if (*midbuf == NULL) {
-      ret = gst_buffer_pool_acquire_buffer (cpad->peer_pool, midbuf, NULL);
-      if (ret != GST_FLOW_OK)
-        goto alloc_failed;
-    }
-
-    if (*outbuf != NULL) {
-      gst_buffer_unref (*outbuf);
-    }
-
-    *outbuf = gst_buffer_ref (*midbuf);
-    GST_DEBUG_OBJECT (cpad, "midbuf=%p, outbuf=%p", *midbuf, *outbuf);
-    ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf);
-
-  } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
-
-beach:
-  GST_DEBUG_OBJECT (cpad, "Returning outbuf=%p *outbuf=%p", outbuf, *outbuf);
-  return ret;
-
-activate_failed:
-  GST_ERROR_OBJECT (cpad, "Failed to activate pool");
-  return GST_FLOW_ERROR;
-
-alloc_failed:
-  GST_DEBUG_OBJECT (cpad, "could not allocate buffer from pool");
-  return ret;
-}
-#endif
-
-
-
-static GstFlowReturn
-gst_v4l2_transform_prepare_output_buffer (GstV4l2Compositor * self, GstV4l2CompositorPad * cpad, GstBuffer * inbuf, GstBuffer ** outbuf)
-{
-  /* GstBufferPool *output_pool = GST_BUFFER_POOL (cpad->m2m->v4l2output->pool); */
-  /* GstBufferPool *capture_pool = GST_BUFFER_POOL (cpad->m2m->v4l2capture->pool); */
-
-  GstV4l2Object * v4l2output = cpad->m2m->v4l2output;
-  GstV4l2Object * v4l2capture = cpad->m2m->v4l2capture;
-
-  GstMemory * outmem;
-
-  GstFlowReturn ret = GST_FLOW_OK;
-
-  /* Ensure input internal pool is active */
-  if (!gst_buffer_pool_is_active (v4l2output->pool)) {
-    GstStructure *config = gst_buffer_pool_get_config (v4l2output->pool);
-    gint min = v4l2output->min_buffers == 0 ? GST_V4L2_MIN_BUFFERS : v4l2output->min_buffers;
-	GstCaps * incaps = gst_pad_get_current_caps (GST_PAD (cpad));
-    gst_buffer_pool_config_set_params (config, incaps, v4l2output->info.size, min, min);
-
-    /* There is no reason to refuse this config */
-    if (!gst_buffer_pool_set_config (v4l2output->pool, config))
-      goto activate_failed;
-
-    if (!gst_buffer_pool_set_active (v4l2output->pool, TRUE))
-      goto activate_failed;
-  }
-
-  GST_DEBUG_OBJECT (cpad, "Queue input buffer");
-  ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (v4l2output->pool), &inbuf);
-  if (G_UNLIKELY (ret != GST_FLOW_OK))
-    goto beach;
-
-  do {
-    if (!gst_buffer_pool_set_active (cpad->peer_pool, TRUE))
-      goto activate_failed;
-
-	if(*outbuf == NULL) {
-	  GST_DEBUG_OBJECT (cpad, "Dequeue output buffer");
-	  ret = gst_buffer_pool_acquire_buffer (cpad->peer_pool, outbuf, NULL);
-	  if (ret != GST_FLOW_OK)
-		goto alloc_failed;
-	}
-
-
-    ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (v4l2capture->pool), outbuf);
-
-	outmem =  gst_buffer_get_memory(*outbuf, 0);
-	printf("outmem = %p\n", outmem);
-
-  } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
-
-  if (ret != GST_FLOW_OK) {
-    gst_buffer_unref (*outbuf);
-    *outbuf = NULL;
-  }
-
-beach:
-  return ret;
-
-activate_failed:
-  GST_ERROR_OBJECT (cpad, "Failed to activate pool");
-  return GST_FLOW_ERROR;
-
-alloc_failed:
-  GST_DEBUG_OBJECT (cpad, "could not allocate buffer from pool");
-  return ret;
-}
-
-
-
-
-
-
-
-
 static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer ** outbuf)
 {
   GList *l;
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
-  //GstV4l2M2m * m2m = self->m2m;
-  //GstBufferPool *output_pool = GST_BUFFER_POOL (m2m->v4l2output->pool);
-  //GstBufferPool *capture_pool = GST_BUFFER_POOL (m2m->v4l2capture->pool);
-  GstFlowReturn ret = GST_FLOW_OK;
-  //GstBuffer * midbuf = NULL;
-  //GstBuffer * buf = NULL;
-
-  GST_DEBUG_OBJECT (self, "Producing output buffer");
+  GstMemory * dmem;
+  GstMemory * smem;
+  GstMemory * smem_pad;
+  GstBuffer * sbuf;
+  GstBuffer * dbuf;
+  gboolean ok;
 
   (*outbuf) = NULL;
-
-
   GST_OBJECT_LOCK (vagg);
+
+  dbuf = gst_buffer_new();
+  if (!dbuf)
+	goto dbuf_new_failed;
+
+  dmem = gst_v4l2_mem2mem_alloc (self->mem2mem, TRUE);
+  if (!dmem)
+	goto dmem_alloc_failed;
+
+  smem = gst_v4l2_mem2mem_alloc (self->mem2mem, FALSE);
+  if (!smem)
+	goto smem_alloc_failed;
+
+  gst_buffer_append_memory (dbuf, dmem);
+
   for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
     GstV4l2VideoAggregatorPad *pad = l->data;
-    GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+    //GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+  	sbuf = pad->buffer;
 
-    ret = gst_v4l2_transform_prepare_output_buffer (self, cpad, pad->buffer, outbuf);
+	smem_pad = gst_buffer_peek_memory (sbuf, 0);
+	ok = gst_v4l2_mem2mem_copy (self->mem2mem, smem, smem_pad);
+	if (!ok)
+	  goto copy_failed;
 
-    //GST_DEBUG_OBJECT (self, "Pad returned buf=%p, midbuf=%p", buf, midbuf);
+	ok = gst_v4l2_mem2mem_process (self->mem2mem, dmem, smem);
+	if (!ok)
+	  goto process_failed;
   }
+
+  gst_memory_unref (smem);
+
+  (*outbuf) = dbuf;
   GST_OBJECT_UNLOCK (vagg);
+  return GST_FLOW_OK;
 
-  return ret;
+dbuf_new_failed:
+  GST_ERROR_OBJECT (self, "gst_buffer_new() for dbuf failed");
+  return GST_FLOW_ERROR;
 
-  //gst_buffer_unref (buf);
+dmem_alloc_failed:
+  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for dmem failed");
+  return GST_FLOW_ERROR;
 
-  /* if (midbuf == NULL) { */
-  /*   GST_DEBUG_OBJECT (self, "Pads did not produced any buffer"); */
-  /*   goto beach; */
-  /* } */
+smem_alloc_failed:
+  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for smem failed");
+  return GST_FLOW_ERROR;
 
-  /* Ensure input internal pool is active */
-/*   if (!gst_buffer_pool_is_active (output_pool)) { */
-/*     GstStructure *config = gst_buffer_pool_get_config (output_pool); */
-/*     gint min = m2m->v4l2output->min_buffers == 0 ? GST_V4L2_MIN_BUFFERS : */
-/*         m2m->v4l2output->min_buffers; */
-/*     gst_buffer_pool_config_set_params (config, self->outcaps, */
-/*         m2m->v4l2output->info.size, min, min); */
+copy_failed:
+  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_copy() failed");
+  return GST_FLOW_ERROR;
 
-/*     /\* There is no reason to refuse this config *\/ */
-/*     if (!gst_buffer_pool_set_config (output_pool, config)) */
-/*       goto activate_failed; */
-
-/*     if (!gst_buffer_pool_set_active (output_pool, TRUE)) */
-/*       goto activate_failed; */
-/*   } */
-
-/*   GST_DEBUG_OBJECT (self, "Queue intermediate buffer"); */
-/*   ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (output_pool), &midbuf); */
-/*   if (G_UNLIKELY (ret != GST_FLOW_OK)) */
-/*     goto beach; */
-
-/*   do { */
-/*     if (!gst_buffer_pool_set_active (capture_pool, TRUE)) */
-/*       goto activate_failed; */
-
-/*     GST_DEBUG_OBJECT (self, "Dequeue output buffer"); */
-/*     ret = gst_buffer_pool_acquire_buffer (capture_pool, outbuf, NULL); */
-
-/*     if (ret != GST_FLOW_OK) */
-/*       goto alloc_failed; */
-
-/*     ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (capture_pool), outbuf); */
-
-/*   } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER); */
-
-/*   gst_buffer_unref (midbuf); */
-
-/*   if (ret != GST_FLOW_OK) { */
-/*     gst_buffer_unref (*outbuf); */
-/*     *outbuf = NULL; */
-/*   } */
-
-/*   //GST_OBJECT_UNLOCK (vagg); */
-/*   return ret; */
-
-/* beach: */
-/*   return ret; */
-
-/* activate_failed: */
-/*   GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS, */
-/*       ("failed to activate bufferpool"), ("failed to activate bufferpool")); */
-/*   return GST_FLOW_ERROR; */
-
-/* alloc_failed: */
-/*   GST_DEBUG_OBJECT (self, "could not allocate buffer from pool"); */
-/*   return ret; */
+process_failed:
+  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_process() failed");
+  return GST_FLOW_ERROR;
 }
 
 static GstFlowReturn
@@ -732,6 +462,10 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
 
   if (!gst_v4l2_object_set_format (self->m2m->v4l2capture, caps))
     goto outcaps_failed;
+
+  if (!gst_v4l2_mem2mem_setup_allocator (self->mem2mem, caps, 4, 4))
+    goto outcaps_failed;
+
 
   /* TODO set_selection */
 
@@ -821,6 +555,9 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
   GST_DEBUG_OBJECT (self, "Opening");
 
   if (!gst_v4l2_m2m_open (self->m2m))
+    goto failure;
+
+  if (!gst_v4l2_mem2mem_open (self->mem2mem))
     goto failure;
 
   GST_OBJECT_LOCK (vagg);
@@ -1075,6 +812,8 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
 
   self->m2m->v4l2capture->no_initial_format = TRUE;
   self->m2m->v4l2capture->keep_aspect = FALSE;
+
+  self->mem2mem = gst_v4l2_mem2mem_new (GST_ELEMENT (self), NULL, NULL);
 }
 
 /* GObject boilerplate */
