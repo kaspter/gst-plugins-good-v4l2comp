@@ -9,7 +9,6 @@ libgstvideo4linux2_la_SOURCES = gstv4l2.c \
 				gstv4l2compositor.c \
 				gstv4l2deviceprovider.c \
 				gstv4l2object.c \
-				gstv4l2m2m.c \
 				gstv4l2mem2mem.c \
 				gstv4l2bufferpool.c \
 				gstv4l2sink.c \
@@ -57,7 +56,6 @@ noinst_HEADERS = \
 	gstv4l2compositorpad.h \
 	gstv4l2deviceprovider.h \
 	gstv4l2object.h \
-	gstv4l2m2m.h \
 	gstv4l2mem2mem.h \
 	gstv4l2sink.h \
 	gstv4l2src.h \

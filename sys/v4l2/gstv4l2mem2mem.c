@@ -58,11 +58,13 @@ gst_v4l2_mem2mem_new (GstElement * element,
   mem2mem->output_object->no_initial_format = TRUE;
   mem2mem->output_object->keep_aspect = FALSE;
   mem2mem->output_object->videodev = g_strdup("/dev/video0");
+  mem2mem->output_object->req_mode = GST_V4L2_IO_MMAP;
 
   mem2mem->capture_object->use_pool = FALSE;
   mem2mem->capture_object->no_initial_format = TRUE;
   mem2mem->capture_object->keep_aspect = FALSE;
   mem2mem->capture_object->videodev = g_strdup("/dev/video0");
+  mem2mem->capture_object->req_mode = GST_V4L2_IO_MMAP;
 
   return mem2mem;
 }
