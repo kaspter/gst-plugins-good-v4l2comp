@@ -129,6 +129,7 @@ struct _GstV4l2Object {
 
   /* optional pool */
   GstBufferPool *pool;
+  gboolean use_pool;
 
   /* the video device's capabilities */
   struct v4l2_capability vcap;
