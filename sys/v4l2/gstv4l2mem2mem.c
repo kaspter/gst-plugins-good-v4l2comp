@@ -112,6 +112,32 @@ gst_v4l2_mem2mem_setup_allocator (GstV4l2Mem2Mem * mem2mem, GstCaps * caps, int 
   if (ret < 0)
 	return FALSE;
 
+  return TRUE;
+}
+
+gboolean
+gst_v4l2_mem2mem_set_selection (GstV4l2Mem2Mem * mem2mem, struct v4l2_rect * drect, struct v4l2_rect * srect)
+{
+  struct v4l2_selection sel;
+  gboolean ret;
+
+  sel.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+  sel.target = V4L2_SEL_TGT_CROP;
+  sel.flags = 0;
+  sel.r = (*srect);
+
+  ret = v4l2_ioctl (mem2mem->output_object->video_fd, VIDIOC_S_SELECTION, &sel);
+  if (ret < 0)
+	return FALSE;
+
+  sel.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  sel.target = V4L2_SEL_TGT_COMPOSE;
+  sel.flags = 0;
+  sel.r = (*drect);
+
+  ret = v4l2_ioctl (mem2mem->capture_object->video_fd, VIDIOC_S_SELECTION, &sel);
+  if (ret < 0)
+	return FALSE;
 
   return TRUE;
 }

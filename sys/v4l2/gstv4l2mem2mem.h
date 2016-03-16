@@ -78,8 +78,6 @@ gboolean     gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstMemory * mds
 
 gboolean     gst_v4l2_mem2mem_copy(GstV4l2Mem2Mem * mem2mem, GstMemory * mdst, GstMemory * msrc);
 
-
-
-
+gboolean     gst_v4l2_mem2mem_set_selection (GstV4l2Mem2Mem * mem2mem, struct v4l2_rect * drect, struct v4l2_rect * srect);
 
 #endif /* __GST_V4L2_MEM2MEM_H__ */
