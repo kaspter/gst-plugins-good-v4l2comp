@@ -48,8 +48,8 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink_%u",
 
 #define DEFAULT_PAD_XPOS   0
 #define DEFAULT_PAD_YPOS   0
-#define DEFAULT_PAD_WIDTH  0
-#define DEFAULT_PAD_HEIGHT 0
+#define DEFAULT_PAD_WIDTH  -1
+#define DEFAULT_PAD_HEIGHT -1
 enum
 {
   PROP_PAD_0,
@@ -329,6 +329,35 @@ gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
   return ret;
 }
 
+
+static void _get_dst_selection_rect(GstV4l2CompositorPad * pad, struct v4l2_rect * rect)
+{
+  GstV4l2VideoAggregatorPad *vagg_pad = GST_V4L2_VIDEO_AGGREGATOR_PAD (pad);
+
+  rect->left = pad->xpos;
+  rect->top = pad->ypos;
+  if (pad->width == DEFAULT_PAD_WIDTH)
+	rect->width = vagg_pad->info.width;
+  else
+	rect->width = pad->width;
+  if (pad->height == DEFAULT_PAD_HEIGHT)
+	rect->height = vagg_pad->info.height;
+  else
+	rect->height = pad->height;
+}
+
+static void _get_src_selection_rect(GstV4l2CompositorPad * pad, struct v4l2_rect * rect)
+{
+  GstV4l2VideoAggregatorPad *vagg_pad = GST_V4L2_VIDEO_AGGREGATOR_PAD (pad);
+
+  rect->left = 0;
+  rect->top = 0;
+  rect->width = vagg_pad->info.width;
+  rect->height = vagg_pad->info.height;
+}
+
+
+
 static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer ** outbuf)
 {
@@ -340,6 +369,9 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
   GstBuffer * sbuf;
   GstBuffer * dbuf;
   gboolean ok;
+  struct v4l2_rect srect;
+  struct v4l2_rect drect;
+
 
   (*outbuf) = NULL;
   GST_OBJECT_LOCK (vagg);
@@ -360,13 +392,20 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
 
   for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
     GstV4l2VideoAggregatorPad *pad = l->data;
-    //GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+    GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
   	sbuf = pad->buffer;
 
 	smem_pad = gst_buffer_peek_memory (sbuf, 0);
 	ok = gst_v4l2_mem2mem_copy (self->mem2mem, smem, smem_pad);
 	if (!ok)
 	  goto copy_failed;
+
+	_get_src_selection_rect(cpad, &srect);
+	_get_dst_selection_rect(cpad, &drect);
+
+	ok = gst_v4l2_mem2mem_set_selection (self->mem2mem, &drect, &srect);
+	if (!ok)
+	  goto set_selection_failed;
 
 	ok = gst_v4l2_mem2mem_process (self->mem2mem, dmem, smem);
 	if (!ok)
@@ -378,6 +417,10 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
   (*outbuf) = dbuf;
   GST_OBJECT_UNLOCK (vagg);
   return GST_FLOW_OK;
+
+set_selection_failed:
+  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_set_selection() failed");
+  return GST_FLOW_ERROR;
 
 dbuf_new_failed:
   GST_ERROR_OBJECT (self, "gst_buffer_new() for dbuf failed");
