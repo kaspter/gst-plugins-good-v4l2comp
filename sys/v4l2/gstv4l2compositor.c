@@ -46,6 +46,9 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink_%u",
     GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE (FORMATS))
     );
 
+
+
+
 #define DEFAULT_PAD_XPOS   0
 #define DEFAULT_PAD_YPOS   0
 #define DEFAULT_PAD_WIDTH  -1
@@ -241,10 +244,16 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
 
 /* GstV4l2Compositor */
 
+#define DEFAULT_PROP_DEVICE   "/dev/video0"
+#define DEFAULT_PROP_IO_MODE  GST_V4L2_IO_AUTO
 enum
 {
   PROP_0,
+  PROP_DEVICE,
+  PROP_OUTPUT_IO_MODE,
+  PROP_CAPTURE_IO_MODE
 };
+
 
 static void
 gst_v4l2_compositor_get_property (GObject * object,
@@ -252,15 +261,23 @@ gst_v4l2_compositor_get_property (GObject * object,
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
-  switch (prop_id) {
+  switch (prop_id)
+    {
+    case PROP_DEVICE:
+      g_value_set_string (value, self->videodev);
+      break;
+    case PROP_OUTPUT_IO_MODE:
+      g_value_set_enum (value, self->output_io_mode);
+      break;
+    case PROP_CAPTURE_IO_MODE:
+      g_value_set_enum (value, self->capture_io_mode);
+      break;
     default:
-      if (!gst_v4l2_mem2mem_get_property_helper (self->mem2mem, prop_id, value,
-          pspec)) {
-        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-      }
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
   }
 }
+
 
 static void
 gst_v4l2_compositor_set_property (GObject * object,
@@ -268,14 +285,25 @@ gst_v4l2_compositor_set_property (GObject * object,
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
-  switch (prop_id) {
-    default:
-      if (!gst_v4l2_mem2mem_set_property_helper (self->mem2mem, prop_id, value,
-          pspec)) {
-        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-      }
+  switch (prop_id)
+    {
+    case PROP_DEVICE:
+      g_free (self->videodev);
+      self->videodev = g_value_dup_string (value);
+      gst_v4l2_mem2mem_set_video_device (self->mem2mem, self->videodev);
       break;
-  }
+    case PROP_OUTPUT_IO_MODE:
+      self->output_io_mode = g_value_get_enum (value);
+      gst_v4l2_mem2mem_set_output_io_mode (self->mem2mem, self->output_io_mode);
+      break;
+    case PROP_CAPTURE_IO_MODE:
+      self->capture_io_mode = g_value_get_enum (value);
+      gst_v4l2_mem2mem_set_capture_io_mode (self->mem2mem, self->capture_io_mode);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
 }
 
 #define gst_v4l2_compositor_parent_class parent_class
@@ -363,56 +391,49 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
 {
   GList *l;
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
-  GstMemory * dmem;
-  GstMemory * smem;
-  GstMemory * smem_pad;
+  GstBuffer * sbuf_pad;
   GstBuffer * sbuf;
   GstBuffer * dbuf;
   gboolean ok;
   struct v4l2_rect srect;
   struct v4l2_rect drect;
+  GstV4l2VideoAggregatorPad *pad;
+  GstV4l2CompositorPad *cpad;
 
 
   (*outbuf) = NULL;
   GST_OBJECT_LOCK (vagg);
 
-  dbuf = gst_buffer_new();
+  dbuf = gst_v4l2_mem2mem_alloc (self->mem2mem, TRUE);
   if (!dbuf)
-	goto dbuf_new_failed;
+	goto dbuf_alloc_failed;
 
-  dmem = gst_v4l2_mem2mem_alloc (self->mem2mem, TRUE);
-  if (!dmem)
-	goto dmem_alloc_failed;
-
-  smem = gst_v4l2_mem2mem_alloc (self->mem2mem, FALSE);
-  if (!smem)
-	goto smem_alloc_failed;
-
-  gst_buffer_append_memory (dbuf, dmem);
+  sbuf = gst_v4l2_mem2mem_alloc (self->mem2mem, FALSE);
+  if (!sbuf)
+	goto sbuf_alloc_failed;
 
   for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
-    GstV4l2VideoAggregatorPad *pad = l->data;
-    GstV4l2CompositorPad *cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-  	sbuf = pad->buffer;
+    pad = l->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+    sbuf_pad = pad->buffer;
 
-	smem_pad = gst_buffer_peek_memory (sbuf, 0);
-	ok = gst_v4l2_mem2mem_copy (self->mem2mem, smem, smem_pad);
-	if (!ok)
-	  goto copy_failed;
+    ok = gst_v4l2_mem2mem_copy_or_import_source (self->mem2mem, sbuf, sbuf_pad);
+    if (!ok)
+      goto copy_failed;
 
-	_get_src_selection_rect(cpad, &srect);
-	_get_dst_selection_rect(cpad, &drect);
+    _get_src_selection_rect(cpad, &srect);
+    _get_dst_selection_rect(cpad, &drect);
 
-	ok = gst_v4l2_mem2mem_set_selection (self->mem2mem, &drect, &srect);
-	if (!ok)
-	  goto set_selection_failed;
+    ok = gst_v4l2_mem2mem_set_selection (self->mem2mem, &drect, &srect);
+    if (!ok)
+      goto set_selection_failed;
 
-	ok = gst_v4l2_mem2mem_process (self->mem2mem, dmem, smem);
-	if (!ok)
-	  goto process_failed;
+    ok = gst_v4l2_mem2mem_process (self->mem2mem, dbuf, sbuf);
+    if (!ok)
+      goto process_failed;
   }
 
-  gst_memory_unref (smem);
+  gst_buffer_unref (sbuf);
 
   (*outbuf) = dbuf;
   GST_OBJECT_UNLOCK (vagg);
@@ -422,16 +443,12 @@ set_selection_failed:
   GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_set_selection() failed");
   return GST_FLOW_ERROR;
 
-dbuf_new_failed:
-  GST_ERROR_OBJECT (self, "gst_buffer_new() for dbuf failed");
+dbuf_alloc_failed:
+  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for dbuf failed");
   return GST_FLOW_ERROR;
 
-dmem_alloc_failed:
-  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for dmem failed");
-  return GST_FLOW_ERROR;
-
-smem_alloc_failed:
-  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for smem failed");
+sbuf_alloc_failed:
+  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for sbuf failed");
   return GST_FLOW_ERROR;
 
 copy_failed:
@@ -701,6 +718,9 @@ static void
 gst_v4l2_compositor_init (GstV4l2Compositor * self)
 {
   self->mem2mem = gst_v4l2_mem2mem_new (GST_ELEMENT (self), NULL, NULL);
+  self->output_io_mode = DEFAULT_PROP_IO_MODE;
+  self->capture_io_mode = DEFAULT_PROP_IO_MODE;
+  self->videodev = g_strdup (DEFAULT_PROP_DEVICE);
 }
 
 /* GObject boilerplate */
@@ -752,5 +772,27 @@ gst_v4l2_compositor_class_init (GstV4l2CompositorClass * klass)
       "Composite multiple video streams using V4L2 API",
       "Frédéric Sureau <frederic.sureau@veo-labs.com>");
 
-  gst_v4l2_object_install_m2m_properties_helper (gobject_class);
+  gst_v4l2_compositor_install_properties_helper (gobject_class);
+}
+
+
+
+void
+gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class)
+{
+  g_object_class_install_property (gobject_class, PROP_DEVICE,
+      g_param_spec_string ("device", "Device", "Device location",
+          NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_OUTPUT_IO_MODE,
+      g_param_spec_enum ("output-io-mode", "Output IO mode",
+          "Output side I/O mode (matches sink pad)",
+          GST_TYPE_V4L2_IO_MODE, DEFAULT_PROP_IO_MODE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_CAPTURE_IO_MODE,
+      g_param_spec_enum ("capture-io-mode", "Capture IO mode",
+          "Capture I/O mode (matches src pad)",
+          GST_TYPE_V4L2_IO_MODE, DEFAULT_PROP_IO_MODE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }

@@ -52,9 +52,12 @@ struct _GstV4l2Compositor
   GstV4l2VideoAggregator videoaggregator;
 
   GstV4l2Mem2Mem * mem2mem;
-  GstCaps *probed_sinkcaps;
-  GstCaps *probed_srccaps;
-  GstCaps *outcaps;
+  GstV4l2IOMode    output_io_mode;
+  GstV4l2IOMode    capture_io_mode;
+  char *           videodev;
+  GstCaps *        probed_sinkcaps;
+  GstCaps *        probed_srccaps;
+  GstCaps *        outcaps;
 };
 
 struct _GstV4l2CompositorClass
@@ -63,6 +66,9 @@ struct _GstV4l2CompositorClass
 };
 
 GType gst_v4l2_compositor_get_type (void);
+
+void gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class);
+
 
 G_END_DECLS
 #endif /* __GST_V4L2_COMPOSITOR_H__ */

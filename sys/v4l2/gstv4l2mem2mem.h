@@ -31,16 +31,17 @@ typedef struct _GstV4l2Mem2Mem GstV4l2Mem2Mem;
 
 #define GST_V4L2_MEM2MEM(obj) (GstV4l2Mem2Mem *)(obj)
 
-struct _GstV4l2Mem2Mem {
-  GstObject * gstobject;
+#define GST_TYPE_V4L2_MEM2MEM      (gst_v4l2_mem2mem_get_type())
 
+struct _GstV4l2Mem2Mem {
+  GstElement * parent;
   GstV4l2Object * output_object;
   GstV4l2Object * capture_object;
   GstV4l2Allocator * output_allocator;
   GstV4l2Allocator * capture_allocator;
+  GstV4l2IOMode output_io_mode;
+  GstV4l2IOMode capture_io_mode;
 };
-
-GType gst_v4l2_mem2mem_get_type (void);
 
 /* create/destroy */
 GstV4l2Mem2Mem*  gst_v4l2_mem2mem_new       (GstElement * element,
@@ -51,13 +52,10 @@ void         gst_v4l2_mem2mem_destroy   (GstV4l2Mem2Mem * mem2mem);
 
 /* properties */
 
-gboolean     gst_v4l2_mem2mem_set_property_helper       (GstV4l2Mem2Mem * mem2mem,
-                                                        guint prop_id,
-                                                        const GValue * value,
-                                                        GParamSpec * pspec);
-gboolean     gst_v4l2_mem2mem_get_property_helper       (GstV4l2Mem2Mem * mem2mem,
-                                                        guint prop_id, GValue * value,
-                                                        GParamSpec * pspec);
+void         gst_v4l2_mem2mem_set_output_io_mode (GstV4l2Mem2Mem * mem2mem, GstV4l2IOMode mode);
+void         gst_v4l2_mem2mem_set_capture_io_mode (GstV4l2Mem2Mem * mem2mem, GstV4l2IOMode mode);
+void         gst_v4l2_mem2mem_set_video_device (GstV4l2Mem2Mem * mem2mem, char * videodev);
+
 /* open/close */
 gboolean     gst_v4l2_mem2mem_open           (GstV4l2Mem2Mem * mem2mem);
 void         gst_v4l2_mem2mem_close          (GstV4l2Mem2Mem * mem2mem);
@@ -72,11 +70,11 @@ void         gst_v4l2_mem2mem_stop           (GstV4l2Mem2Mem * mem2mem);
 
 gboolean     gst_v4l2_mem2mem_setup_allocator (GstV4l2Mem2Mem * mem2mem, GstCaps * caps, int output_nbufs, int capture_nbufs);
 
-GstMemory *  gst_v4l2_mem2mem_alloc (GstV4l2Mem2Mem * mem2mem, gboolean capture_buf);
+GstBuffer *  gst_v4l2_mem2mem_alloc (GstV4l2Mem2Mem * mem2mem, gboolean capture_buf);
 
-gboolean     gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstMemory * mdst, GstMemory * msrc);
+gboolean     gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf);
 
-gboolean     gst_v4l2_mem2mem_copy(GstV4l2Mem2Mem * mem2mem, GstMemory * mdst, GstMemory * msrc);
+gboolean     gst_v4l2_mem2mem_copy_or_import_source(GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf);
 
 gboolean     gst_v4l2_mem2mem_set_selection (GstV4l2Mem2Mem * mem2mem, struct v4l2_rect * drect, struct v4l2_rect * srect);
 

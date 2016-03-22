@@ -30,12 +30,6 @@
 GST_DEBUG_CATEGORY_EXTERN (v4l2_debug);
 #define GST_CAT_DEFAULT v4l2_debug
 
-enum
-{
-  PROP_0,
-  V4L2_STD_OBJECT_PROPS,
-};
-
 GstV4l2Mem2Mem *
 gst_v4l2_mem2mem_new (GstElement * element,
     const char *default_device,
@@ -43,7 +37,12 @@ gst_v4l2_mem2mem_new (GstElement * element,
 {
   GstV4l2Mem2Mem * mem2mem;
 
-  mem2mem = g_new0 (GstV4l2Mem2Mem, 1);
+  mem2mem = (GstV4l2Mem2Mem *) g_new0 (GstV4l2Mem2Mem, 1);
+
+  mem2mem->parent = element;
+
+  mem2mem->output_io_mode = GST_V4L2_IO_AUTO;
+  mem2mem->capture_io_mode = GST_V4L2_IO_AUTO;
 
   mem2mem->output_object = gst_v4l2_object_new(element, V4L2_BUF_TYPE_VIDEO_OUTPUT,
       default_device, gst_v4l2_get_output, gst_v4l2_set_output, update_fps_func);
@@ -57,14 +56,10 @@ gst_v4l2_mem2mem_new (GstElement * element,
   mem2mem->output_object->use_pool = FALSE;
   mem2mem->output_object->no_initial_format = TRUE;
   mem2mem->output_object->keep_aspect = FALSE;
-  mem2mem->output_object->videodev = g_strdup("/dev/video0");
-  mem2mem->output_object->req_mode = GST_V4L2_IO_MMAP;
 
   mem2mem->capture_object->use_pool = FALSE;
   mem2mem->capture_object->no_initial_format = TRUE;
   mem2mem->capture_object->keep_aspect = FALSE;
-  mem2mem->capture_object->videodev = g_strdup("/dev/video0");
-  mem2mem->capture_object->req_mode = GST_V4L2_IO_MMAP;
 
   return mem2mem;
 }
@@ -80,11 +75,57 @@ gst_v4l2_mem2mem_destroy (GstV4l2Mem2Mem * mem2mem)
   g_free (mem2mem);
 }
 
+
+static GstV4l2IOMode
+get_io_mode (GstV4l2Mem2Mem * mem2mem, gboolean capture)
+{
+  GstV4l2IOMode mode;
+
+  if (capture)
+    mode = mem2mem->capture_io_mode;
+  else
+    mode = mem2mem->output_io_mode;
+
+  if (mode == GST_V4L2_IO_AUTO)
+    return GST_V4L2_IO_MMAP;
+  else
+    return mode;
+}
+
+
+static gboolean
+get_v4l2_memory(GstV4l2Mem2Mem * mem2mem, gboolean capture, enum v4l2_memory * memory)
+{
+  GstV4l2IOMode mode;
+
+  mode = get_io_mode(mem2mem, capture);
+
+  switch(mode)
+    {
+    case GST_V4L2_IO_AUTO:
+    case GST_V4L2_IO_RW:
+    case GST_V4L2_IO_USERPTR:
+    default:
+      return FALSE;
+
+    case GST_V4L2_IO_DMABUF:
+    case GST_V4L2_IO_DMABUF_IMPORT:
+      (*memory) = V4L2_MEMORY_DMABUF;
+      return TRUE;
+
+    case GST_V4L2_IO_MMAP:
+      (*memory) = V4L2_MEMORY_MMAP;
+      return TRUE;
+    }
+}
+
+
 gboolean
 gst_v4l2_mem2mem_setup_allocator (GstV4l2Mem2Mem * mem2mem, GstCaps * caps, int output_nbufs, int capture_nbufs)
 {
   gboolean ok;
   int ret;
+  enum v4l2_memory memory;
 
   ok = gst_v4l2_object_set_format (mem2mem->output_object, caps);
   if (!ok)
@@ -94,13 +135,21 @@ gst_v4l2_mem2mem_setup_allocator (GstV4l2Mem2Mem * mem2mem, GstCaps * caps, int 
   if (!ok)
 	return FALSE;
 
-  mem2mem->output_allocator = gst_v4l2_allocator_new(GST_OBJECT (mem2mem), mem2mem->output_object->video_fd, &mem2mem->output_object->format);
-  ret = gst_v4l2_allocator_start (mem2mem->output_allocator, output_nbufs, V4L2_MEMORY_MMAP);
+  ok = get_v4l2_memory (mem2mem, FALSE, &memory);
+  if (!ok)
+	return FALSE;
+
+  mem2mem->output_allocator = gst_v4l2_allocator_new(GST_OBJECT(mem2mem->parent), mem2mem->output_object->video_fd, &mem2mem->output_object->format);
+  ret = gst_v4l2_allocator_start (mem2mem->output_allocator, output_nbufs, memory);
   if (ret != output_nbufs)
 	return FALSE;
 
-  mem2mem->capture_allocator = gst_v4l2_allocator_new(GST_OBJECT (mem2mem), mem2mem->capture_object->video_fd, &mem2mem->capture_object->format);
-  ret = gst_v4l2_allocator_start (mem2mem->capture_allocator, capture_nbufs, V4L2_MEMORY_MMAP);
+  ok = get_v4l2_memory (mem2mem, TRUE, &memory);
+  if (!ok)
+	return FALSE;
+
+  mem2mem->capture_allocator = gst_v4l2_allocator_new(GST_OBJECT (mem2mem->parent), mem2mem->capture_object->video_fd, &mem2mem->capture_object->format);
+  ret = gst_v4l2_allocator_start (mem2mem->capture_allocator, capture_nbufs, memory);
   if (ret != capture_nbufs)
 	return FALSE;
 
@@ -143,32 +192,64 @@ gst_v4l2_mem2mem_set_selection (GstV4l2Mem2Mem * mem2mem, struct v4l2_rect * dre
 }
 
 
-GstMemory *
-gst_v4l2_mem2mem_alloc (GstV4l2Mem2Mem * mem2mem, gboolean capture_buf)
+GstBuffer *
+gst_v4l2_mem2mem_alloc (GstV4l2Mem2Mem * mem2mem, gboolean capture)
 {
   GstV4l2MemoryGroup * group;
+  GstV4l2Allocator * allocator;
+  GstV4l2IOMode mode;
+  GstBuffer * buf;
+  GstMemory * mem;
 
-  if (capture_buf) {
-	group = gst_v4l2_allocator_alloc_mmap (mem2mem->capture_allocator);
+  buf = gst_buffer_new();
+  if (!buf)
+    return NULL;
+
+  if (capture) {
+    allocator = mem2mem->capture_allocator;
   }
   else {
-	group = gst_v4l2_allocator_alloc_mmap (mem2mem->output_allocator);
+    allocator = mem2mem->output_allocator;
   }
+
+  mode = get_io_mode(mem2mem, capture);
+
+  switch (mode)
+    {
+    case GST_V4L2_IO_MMAP:
+      group = gst_v4l2_allocator_alloc_mmap (allocator);
+      break;
+    case GST_V4L2_IO_DMABUF_IMPORT:
+      group = gst_v4l2_allocator_alloc_dmabufin (allocator);
+      break;
+    default:
+      return NULL;
+    }
 
   if (!(group && (group->n_mem==1)))
 	return NULL;
 
-  return group->mem[0];
+  mem = group->mem[0];
+
+  gst_buffer_append_memory (buf, mem);
+
+  return buf;
 }
 
 
 
-gboolean
-gst_v4l2_mem2mem_copy(GstV4l2Mem2Mem * mem2mem, GstMemory * dmem, GstMemory * smem)
+static gboolean
+copy(GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf)
 {
   GstMapInfo idst;
   GstMapInfo isrc;
   gboolean ok;
+  GstMemory * dmem;
+  GstMemory * smem;
+
+  smem = gst_buffer_peek_memory (sbuf, 0);
+
+  dmem = gst_buffer_peek_memory (dbuf, 0);
 
   if (! gst_is_v4l2_memory (dmem))
 	return FALSE;
@@ -200,24 +281,103 @@ gst_v4l2_mem2mem_copy(GstV4l2Mem2Mem * mem2mem, GstMemory * dmem, GstMemory * sm
   return FALSE;
 }
 
-gboolean
-gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstMemory * dmem_p, GstMemory * smem_p)
+
+static gboolean
+import(GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf)
 {
   gboolean ok;
-  GstV4l2Memory * dmem = NULL;
-  GstV4l2Memory * smem = NULL;
+  GstV4l2MemoryGroup *group;
+  GstMemory * smem;
+  GstV4l2Memory * dmem;
+
+  smem = gst_buffer_peek_memory (sbuf, 0);
+
+  dmem = (GstV4l2Memory *)gst_buffer_peek_memory (dbuf, 0);
+  group=dmem->group;
+
+  ok = gst_v4l2_allocator_import_dmabuf (mem2mem->output_allocator, group, 1, &smem);
+  if (! ok)
+    return FALSE;
+
+
+  return TRUE;
+}
+
+
+
+
+
+
+
+
+gboolean
+gst_v4l2_mem2mem_copy_or_import_source (GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf)
+{
+  GstV4l2IOMode mode;
+
+  mode = get_io_mode(mem2mem, FALSE);
+
+  switch (mode)
+    {
+    case GST_V4L2_IO_MMAP:
+      return copy(mem2mem, dbuf, sbuf);
+    case GST_V4L2_IO_DMABUF_IMPORT:
+      return import(mem2mem, dbuf, sbuf);
+    default:
+      return FALSE;
+    }
+}
+
+
+
+
+void
+gst_v4l2_mem2mem_set_output_io_mode (GstV4l2Mem2Mem * mem2mem, GstV4l2IOMode mode)
+{
+  mem2mem->output_io_mode = mode;
+  mem2mem->output_object->req_mode = mode;
+}
+
+void
+gst_v4l2_mem2mem_set_capture_io_mode (GstV4l2Mem2Mem * mem2mem, GstV4l2IOMode mode)
+{
+  mem2mem->capture_io_mode = mode;
+  mem2mem->capture_object->req_mode = mode;
+}
+
+void
+gst_v4l2_mem2mem_set_video_device (GstV4l2Mem2Mem * mem2mem, char * videodev)
+{
+  mem2mem->capture_object->videodev = g_strdup (videodev);
+  mem2mem->output_object->videodev = g_strdup (videodev);
+}
+
+
+gboolean
+gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf)
+{
+  gboolean ok;
+  GstMemory * dmem_b;
+  GstMemory * smem_b;
+  GstV4l2Memory * dmem;
+  GstV4l2Memory * smem;
   GstFlowReturn flow;
-  GstV4l2MemoryGroup * dmgroup = NULL;
-  GstV4l2MemoryGroup * smgroup = NULL;
+  GstV4l2MemoryGroup * dmgroup;
+  GstV4l2MemoryGroup * smgroup;
 
-  if (! gst_is_v4l2_memory (dmem_p))
+  smem_b = gst_buffer_peek_memory (sbuf, 0);
+
+  dmem_b = gst_buffer_peek_memory (dbuf, 0);
+
+  if (! gst_is_v4l2_memory (dmem_b))
 	return FALSE;
 
-  if (! gst_is_v4l2_memory (smem_p))
+  if (! gst_is_v4l2_memory (smem_b))
 	return FALSE;
 
-  dmem = (GstV4l2Memory *)dmem_p;
-  smem = (GstV4l2Memory *)smem_p;
+  smem = (GstV4l2Memory *)smem_b;
+
+  dmem = (GstV4l2Memory *)dmem_b;
 
   ok = gst_v4l2_allocator_qbuf (mem2mem->output_allocator, smem->group);
   if (!ok)
@@ -238,13 +398,13 @@ gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstMemory * dmem_p, GstMemor
   if (smgroup->n_mem != 1)
 	return FALSE;
 
-  if (smgroup->mem[0] != smem_p)
+  if (smgroup->mem[0] != smem_b)
 	return FALSE;
 
   if (dmgroup->n_mem != 1)
 	return FALSE;
 
-  if (dmgroup->mem[0] != dmem_p)
+  if (dmgroup->mem[0] != dmem_b)
 	return FALSE;
 
   return TRUE;
@@ -252,52 +412,6 @@ gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstMemory * dmem_p, GstMemor
 
 
 
-
-
-
-gboolean
-gst_v4l2_mem2mem_set_property_helper (GstV4l2Mem2Mem * mem2mem,
-    guint prop_id, const GValue * value, GParamSpec * pspec)
-{
-  switch (prop_id) {
-    case PROP_OUTPUT_IO_MODE:
-      gst_v4l2_object_set_property_helper (mem2mem->output_object, PROP_IO_MODE, value,
-          pspec);
-      break;
-    case PROP_CAPTURE_IO_MODE:
-      gst_v4l2_object_set_property_helper (mem2mem->capture_object, PROP_IO_MODE, value,
-          pspec);
-      break;
-    default:
-      /* By default, only set on output */
-      return gst_v4l2_object_set_property_helper (mem2mem->output_object, prop_id,
-          value, pspec);
-  }
-
-  return TRUE;
-}
-
-gboolean
-gst_v4l2_mem2mem_get_property_helper (GstV4l2Mem2Mem * mem2mem,
-    guint prop_id, GValue * value, GParamSpec * pspec)
-{
-  switch (prop_id) {
-    case PROP_OUTPUT_IO_MODE:
-      gst_v4l2_object_get_property_helper (mem2mem->output_object, PROP_IO_MODE, value,
-          pspec);
-      break;
-    case PROP_CAPTURE_IO_MODE:
-      gst_v4l2_object_get_property_helper (mem2mem->capture_object, PROP_IO_MODE, value,
-          pspec);
-      break;
-    default:
-      /* By default read from output */
-      return gst_v4l2_object_get_property_helper (mem2mem->output_object, prop_id,
-          value, pspec);
-  }
-
-  return TRUE;
-}
 
 gboolean
 gst_v4l2_mem2mem_open (GstV4l2Mem2Mem * mem2mem)
