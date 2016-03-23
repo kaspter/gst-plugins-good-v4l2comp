@@ -39,6 +39,7 @@ struct _GstV4l2Mem2Mem {
   GstV4l2Object * capture_object;
   GstV4l2Allocator * output_allocator;
   GstV4l2Allocator * capture_allocator;
+  GstAllocator * dmabuf_allocator;
   GstV4l2IOMode output_io_mode;
   GstV4l2IOMode capture_io_mode;
 };

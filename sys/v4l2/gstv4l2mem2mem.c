@@ -26,6 +26,7 @@
 #include "gstv4l2mem2mem.h"
 #include "gstv4l2object.h"
 #include "v4l2_calls.h"
+#include "gst/allocators/gstdmabuf.h"
 
 GST_DEBUG_CATEGORY_EXTERN (v4l2_debug);
 #define GST_CAT_DEFAULT v4l2_debug
@@ -52,6 +53,7 @@ gst_v4l2_mem2mem_new (GstElement * element,
 
   mem2mem->output_allocator = NULL;
   mem2mem->capture_allocator = NULL;
+  mem2mem->dmabuf_allocator = NULL;
 
   mem2mem->output_object->use_pool = FALSE;
   mem2mem->output_object->no_initial_format = TRUE;
@@ -109,7 +111,14 @@ get_v4l2_memory(GstV4l2Mem2Mem * mem2mem, gboolean capture, enum v4l2_memory * m
       return FALSE;
 
     case GST_V4L2_IO_DMABUF:
+      if (! capture)
+	return FALSE;
+      (*memory) = V4L2_MEMORY_MMAP;
+      return TRUE;
+
     case GST_V4L2_IO_DMABUF_IMPORT:
+      if (capture)
+	return FALSE;
       (*memory) = V4L2_MEMORY_DMABUF;
       return TRUE;
 
@@ -160,6 +169,8 @@ gst_v4l2_mem2mem_setup_allocator (GstV4l2Mem2Mem * mem2mem, GstCaps * caps, int 
   ret = v4l2_ioctl (mem2mem->capture_object->video_fd, VIDIOC_STREAMON, &mem2mem->capture_object->type);
   if (ret < 0)
 	return FALSE;
+
+  mem2mem->dmabuf_allocator = gst_dmabuf_allocator_new ();
 
   return TRUE;
 }
@@ -221,6 +232,9 @@ gst_v4l2_mem2mem_alloc (GstV4l2Mem2Mem * mem2mem, gboolean capture)
       break;
     case GST_V4L2_IO_DMABUF_IMPORT:
       group = gst_v4l2_allocator_alloc_dmabufin (allocator);
+      break;
+    case GST_V4L2_IO_DMABUF:
+      group = gst_v4l2_allocator_alloc_dmabuf (allocator, mem2mem->dmabuf_allocator);
       break;
     default:
       return NULL;
@@ -366,18 +380,22 @@ gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer 
   GstV4l2MemoryGroup * smgroup;
 
   smem_b = gst_buffer_peek_memory (sbuf, 0);
-
-  dmem_b = gst_buffer_peek_memory (dbuf, 0);
-
-  if (! gst_is_v4l2_memory (dmem_b))
-	return FALSE;
-
   if (! gst_is_v4l2_memory (smem_b))
 	return FALSE;
-
   smem = (GstV4l2Memory *)smem_b;
 
-  dmem = (GstV4l2Memory *)dmem_b;
+  dmem_b = gst_buffer_peek_memory (dbuf, 0);
+  if (dmem_b->allocator == mem2mem->dmabuf_allocator) {
+    dmem = (GstV4l2Memory *)gst_mini_object_get_qdata (GST_MINI_OBJECT (dmem_b), GST_V4L2_MEMORY_QUARK);
+    if (dmem->mem.allocator != (GstAllocator *)mem2mem->capture_allocator)
+      return FALSE;
+  }
+
+  else if (! gst_is_v4l2_memory (smem_b))
+    return FALSE;
+
+  else
+    dmem = (GstV4l2Memory *)dmem_b;
 
   ok = gst_v4l2_allocator_qbuf (mem2mem->output_allocator, smem->group);
   if (!ok)
