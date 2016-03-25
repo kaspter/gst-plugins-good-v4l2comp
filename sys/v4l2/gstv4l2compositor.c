@@ -486,7 +486,7 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   gst_caps_replace (&self->outcaps, caps);
 
   /** Set format **/
-  if (!gst_v4l2_mem2mem_setup_allocator (self->mem2mem, caps, 4, 4))
+  if (!gst_v4l2_mem2mem_setup_allocator (self->mem2mem, caps, 2, 2))
     goto outcaps_failed;
 
   /* TODO set_selection */

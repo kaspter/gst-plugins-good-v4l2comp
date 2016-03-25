@@ -150,7 +150,7 @@ gst_v4l2_mem2mem_setup_allocator (GstV4l2Mem2Mem * mem2mem, GstCaps * caps, int 
 
   mem2mem->output_allocator = gst_v4l2_allocator_new(GST_OBJECT(mem2mem->parent), mem2mem->output_object->video_fd, &mem2mem->output_object->format);
   ret = gst_v4l2_allocator_start (mem2mem->output_allocator, output_nbufs, memory);
-  if (ret != output_nbufs)
+  if (ret < output_nbufs)
 	return FALSE;
 
   ok = get_v4l2_memory (mem2mem, TRUE, &memory);
@@ -159,7 +159,7 @@ gst_v4l2_mem2mem_setup_allocator (GstV4l2Mem2Mem * mem2mem, GstCaps * caps, int 
 
   mem2mem->capture_allocator = gst_v4l2_allocator_new(GST_OBJECT (mem2mem->parent), mem2mem->capture_object->video_fd, &mem2mem->capture_object->format);
   ret = gst_v4l2_allocator_start (mem2mem->capture_allocator, capture_nbufs, memory);
-  if (ret != capture_nbufs)
+  if (ret < capture_nbufs)
 	return FALSE;
 
   ret = v4l2_ioctl (mem2mem->output_object->video_fd, VIDIOC_STREAMON, &mem2mem->output_object->type);
