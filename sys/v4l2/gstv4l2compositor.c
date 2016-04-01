@@ -627,18 +627,32 @@ gst_v4l2_compositor_sink_event (GstV4l2Aggregator * agg,
     GstV4l2AggregatorPad * bpad, GstEvent * event)
 {
   gboolean ret;
+  GstV4l2Compositor * self = GST_V4L2_COMPOSITOR (agg);
 
-  switch (GST_EVENT_TYPE (event)) {
+  switch (GST_EVENT_TYPE (event))
+    {
+    case GST_EVENT_FLUSH_START:
+      GST_DEBUG_OBJECT (self, "flush start");
+      gst_v4l2_mem2mem_unlock(self->mem2mem);
+      break;
+
     default:
       break;
-  }
+    }
 
   ret = GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_event (agg, bpad, event);
 
-  switch (GST_EVENT_TYPE (event)) {
+  switch (GST_EVENT_TYPE (event))
+    {
+    case GST_EVENT_FLUSH_STOP:
+      /* Buffer should be back now */
+      GST_DEBUG_OBJECT (self, "flush stop");
+      gst_v4l2_mem2mem_unlock_stop(self->mem2mem);
+      break;
+
     default:
       break;
-  }
+    }
 
   return ret;
 }
