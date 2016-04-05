@@ -23,7 +23,7 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include "gstv4l2mem2mem.h"
+#include "gstv4l2m2m.h"
 #include "gstv4l2videoaggregator.h"
 
 
@@ -51,7 +51,7 @@ struct _GstV4l2Compositor
 {
   GstV4l2VideoAggregator videoaggregator;
 
-  GstV4l2Mem2Mem * mem2mem;
+  GstV4l2M2m *     m2m;
   GstV4l2IOMode    output_io_mode;
   GstV4l2IOMode    capture_io_mode;
   char *           videodev;
