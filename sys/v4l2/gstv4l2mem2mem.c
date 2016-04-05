@@ -252,6 +252,43 @@ gst_v4l2_mem2mem_alloc (GstV4l2Mem2Mem * mem2mem, gboolean capture)
 
 
 
+
+void
+gst_v4l2_mem2mem_free (GstV4l2Mem2Mem * mem2mem, gboolean capture, GstBuffer * buf)
+{
+  GstMemory * mem;
+  GstV4l2IOMode mode;
+  GstV4l2Allocator * allocator;
+  GstV4l2MemoryGroup *group;
+
+  mem = gst_buffer_peek_memory (buf, 0);
+
+  if (capture) {
+    allocator = mem2mem->capture_allocator;
+  }
+  else {
+    allocator = mem2mem->output_allocator;
+  }
+
+  mode = get_io_mode(mem2mem, capture);
+  switch (mode)
+    {
+    case GST_V4L2_IO_DMABUF_IMPORT:
+      group = ((GstV4l2Memory *)mem)->group;
+      gst_v4l2_allocator_reset_group (allocator, group);
+      break;
+    default:
+      break;
+    }
+
+  gst_buffer_unref (buf);
+}
+
+
+
+
+
+
 static gboolean
 copy(GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf)
 {

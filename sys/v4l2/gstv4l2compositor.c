@@ -400,63 +400,73 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
 
-
+  sbuf = NULL;
+  dbuf = NULL;
   (*outbuf) = NULL;
   GST_OBJECT_LOCK (vagg);
 
-  dbuf = gst_v4l2_mem2mem_alloc (self->mem2mem, TRUE);
-  if (!dbuf)
-	goto dbuf_alloc_failed;
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    pad = l->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+    if (!pad->buffer)
+      goto not_ready;
+  }
 
-  sbuf = gst_v4l2_mem2mem_alloc (self->mem2mem, FALSE);
-  if (!sbuf)
-	goto sbuf_alloc_failed;
+  dbuf = gst_v4l2_mem2mem_alloc (self->mem2mem, TRUE);
+  if (!dbuf) {
+    GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for dbuf failed");
+    goto failed;
+  }
 
   for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
     pad = l->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     sbuf_pad = pad->buffer;
 
+    sbuf = gst_v4l2_mem2mem_alloc (self->mem2mem, FALSE);
+    if (!sbuf) {
+      GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for sbuf failed");
+      goto failed;
+    }
+
     ok = gst_v4l2_mem2mem_copy_or_import_source (self->mem2mem, sbuf, sbuf_pad);
-    if (!ok)
-      goto copy_failed;
+    if (!ok) {
+      GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_copy_or_import_source() failed");
+      goto failed;
+    }
 
     _get_src_selection_rect(cpad, &srect);
     _get_dst_selection_rect(cpad, &drect);
 
     ok = gst_v4l2_mem2mem_set_selection (self->mem2mem, &drect, &srect);
-    if (!ok)
-      goto set_selection_failed;
+    if (!ok) {
+      GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_set_selection() failed");
+      goto failed;
+    }
 
     ok = gst_v4l2_mem2mem_process (self->mem2mem, dbuf, sbuf);
-    if (!ok)
-      goto process_failed;
-  }
+    if (!ok) {
+      GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_process() failed");
+      goto failed;
+    }
 
-  gst_buffer_unref (sbuf);
+    gst_v4l2_mem2mem_free (self->mem2mem, FALSE, sbuf);
+  }
 
   (*outbuf) = dbuf;
   GST_OBJECT_UNLOCK (vagg);
   return GST_FLOW_OK;
 
-set_selection_failed:
-  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_set_selection() failed");
-  return GST_FLOW_ERROR;
+not_ready:
+  GST_OBJECT_UNLOCK (vagg);
+  return GST_FLOW_OK;
 
-dbuf_alloc_failed:
-  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for dbuf failed");
-  return GST_FLOW_ERROR;
-
-sbuf_alloc_failed:
-  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_alloc() for sbuf failed");
-  return GST_FLOW_ERROR;
-
-copy_failed:
-  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_copy() failed");
-  return GST_FLOW_ERROR;
-
-process_failed:
-  GST_ERROR_OBJECT (self, "gst_v4l2_mem2mem_process() failed");
+failed:
+  GST_OBJECT_UNLOCK (vagg);
+  if (sbuf)
+    gst_v4l2_mem2mem_free (self->mem2mem, FALSE, sbuf);
+  if (dbuf)
+    gst_v4l2_mem2mem_free (self->mem2mem, TRUE, dbuf);
   return GST_FLOW_ERROR;
 }
 

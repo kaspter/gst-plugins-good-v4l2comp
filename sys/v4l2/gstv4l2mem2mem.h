@@ -73,6 +73,8 @@ gboolean     gst_v4l2_mem2mem_setup_allocator (GstV4l2Mem2Mem * mem2mem, GstCaps
 
 GstBuffer *  gst_v4l2_mem2mem_alloc (GstV4l2Mem2Mem * mem2mem, gboolean capture_buf);
 
+void         gst_v4l2_mem2mem_free (GstV4l2Mem2Mem * mem2mem, gboolean capture_buf, GstBuffer * sbuf);
+
 gboolean     gst_v4l2_mem2mem_process (GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf);
 
 gboolean     gst_v4l2_mem2mem_copy_or_import_source(GstV4l2Mem2Mem * mem2mem, GstBuffer * dbuf, GstBuffer * sbuf);
