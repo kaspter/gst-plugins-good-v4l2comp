@@ -61,3 +61,4 @@ Build
 /test-driver
 *.log
 *.trs
+arm-poky-linux-gnueabi-libtool
