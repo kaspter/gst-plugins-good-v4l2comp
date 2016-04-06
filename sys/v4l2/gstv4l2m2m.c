@@ -42,26 +42,26 @@ gst_v4l2_m2m_new (GstElement * element,
 
   m2m->parent = element;
 
-  m2m->output_io_mode = GST_V4L2_IO_AUTO;
-  m2m->capture_io_mode = GST_V4L2_IO_AUTO;
+  m2m->sink_iomode = GST_V4L2_IO_AUTO;
+  m2m->source_iomode = GST_V4L2_IO_AUTO;
 
-  m2m->output_object = gst_v4l2_object_new(element, V4L2_BUF_TYPE_VIDEO_OUTPUT,
+  m2m->sink_obj = gst_v4l2_object_new(element, V4L2_BUF_TYPE_VIDEO_OUTPUT,
       default_device, gst_v4l2_get_output, gst_v4l2_set_output, update_fps_func);
 
-  m2m->capture_object = gst_v4l2_object_new(element, V4L2_BUF_TYPE_VIDEO_CAPTURE,
+  m2m->source_obj = gst_v4l2_object_new(element, V4L2_BUF_TYPE_VIDEO_CAPTURE,
       default_device, gst_v4l2_get_input, gst_v4l2_set_input, update_fps_func);
 
-  m2m->output_allocator = NULL;
-  m2m->capture_allocator = NULL;
+  m2m->sink_allocator = NULL;
+  m2m->source_allocator = NULL;
   m2m->dmabuf_allocator = NULL;
 
-  m2m->output_object->use_pool = FALSE;
-  m2m->output_object->no_initial_format = TRUE;
-  m2m->output_object->keep_aspect = FALSE;
+  m2m->sink_obj->use_pool = FALSE;
+  m2m->sink_obj->no_initial_format = TRUE;
+  m2m->sink_obj->keep_aspect = FALSE;
 
-  m2m->capture_object->use_pool = FALSE;
-  m2m->capture_object->no_initial_format = TRUE;
-  m2m->capture_object->keep_aspect = FALSE;
+  m2m->source_obj->use_pool = FALSE;
+  m2m->source_obj->no_initial_format = TRUE;
+  m2m->source_obj->keep_aspect = FALSE;
 
   return m2m;
 }
@@ -71,22 +71,22 @@ gst_v4l2_m2m_destroy (GstV4l2M2m * m2m)
 {
   g_return_if_fail (m2m != NULL);
 
-  gst_v4l2_object_destroy (m2m->capture_object);
-  gst_v4l2_object_destroy (m2m->output_object);
+  gst_v4l2_object_destroy (m2m->source_obj);
+  gst_v4l2_object_destroy (m2m->sink_obj);
 
   g_free (m2m);
 }
 
 
 static GstV4l2IOMode
-get_io_mode (GstV4l2M2m * m2m, gboolean capture)
+get_io_mode (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
 {
   GstV4l2IOMode mode;
 
-  if (capture)
-    mode = m2m->capture_io_mode;
+  if (buf_type == GST_V4L2_M2M_BUFTYPE_SOURCE)
+    mode = m2m->source_iomode;
   else
-    mode = m2m->output_io_mode;
+    mode = m2m->sink_iomode;
 
   if (mode == GST_V4L2_IO_AUTO)
     return GST_V4L2_IO_MMAP;
@@ -94,13 +94,24 @@ get_io_mode (GstV4l2M2m * m2m, gboolean capture)
     return mode;
 }
 
+static GstV4l2Allocator *
+get_allocator (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
+{
+  if (buf_type == GST_V4L2_M2M_BUFTYPE_SOURCE) {
+    return m2m->source_allocator;
+  }
+  else {
+    return m2m->sink_allocator;
+  }
+}
+
 
 static gboolean
-get_v4l2_memory(GstV4l2M2m * m2m, gboolean capture, enum v4l2_memory * memory)
+get_v4l2_memory(GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type, enum v4l2_memory * memory)
 {
   GstV4l2IOMode mode;
 
-  mode = get_io_mode(m2m, capture);
+  mode = get_io_mode(m2m, buf_type);
 
   switch(mode)
     {
@@ -111,13 +122,13 @@ get_v4l2_memory(GstV4l2M2m * m2m, gboolean capture, enum v4l2_memory * memory)
       return FALSE;
 
     case GST_V4L2_IO_DMABUF:
-      if (! capture)
+      if (buf_type == GST_V4L2_M2M_BUFTYPE_SINK)
 	return FALSE;
       (*memory) = V4L2_MEMORY_MMAP;
       return TRUE;
 
     case GST_V4L2_IO_DMABUF_IMPORT:
-      if (capture)
+      if (buf_type == GST_V4L2_M2M_BUFTYPE_SOURCE)
 	return FALSE;
       (*memory) = V4L2_MEMORY_DMABUF;
       return TRUE;
@@ -130,47 +141,49 @@ get_v4l2_memory(GstV4l2M2m * m2m, gboolean capture, enum v4l2_memory * memory)
 
 
 gboolean
-gst_v4l2_m2m_setup_allocator (GstV4l2M2m * m2m, GstCaps * caps, int output_nbufs, int capture_nbufs)
+gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps, int source_nbufs, GstCaps * sink_caps, int sink_nbufs)
 {
   gboolean ok;
   int ret;
   enum v4l2_memory memory;
 
-  ok = gst_v4l2_object_set_format (m2m->output_object, caps);
+  ok = gst_v4l2_object_set_format (m2m->sink_obj, sink_caps);
   if (!ok)
 	return FALSE;
 
-  ok = gst_v4l2_object_set_format (m2m->capture_object, caps);
+  ok = gst_v4l2_object_set_format (m2m->source_obj, source_caps);
   if (!ok)
 	return FALSE;
 
-  ok = get_v4l2_memory (m2m, FALSE, &memory);
+  ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SINK, &memory);
   if (!ok)
 	return FALSE;
 
-  m2m->output_allocator = gst_v4l2_allocator_new(GST_OBJECT(m2m->parent), m2m->output_object->video_fd, &m2m->output_object->format);
-  ret = gst_v4l2_allocator_start (m2m->output_allocator, output_nbufs, memory);
-  if (ret < output_nbufs)
+  m2m->sink_allocator = gst_v4l2_allocator_new(GST_OBJECT(m2m->parent), m2m->sink_obj->video_fd, &m2m->sink_obj->format);
+  ret = gst_v4l2_allocator_start (m2m->sink_allocator, sink_nbufs, memory);
+  if (ret < sink_nbufs)
 	return FALSE;
 
-  ok = get_v4l2_memory (m2m, TRUE, &memory);
+  ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, &memory);
   if (!ok)
 	return FALSE;
 
-  m2m->capture_allocator = gst_v4l2_allocator_new(GST_OBJECT (m2m->parent), m2m->capture_object->video_fd, &m2m->capture_object->format);
-  ret = gst_v4l2_allocator_start (m2m->capture_allocator, capture_nbufs, memory);
-  if (ret < capture_nbufs)
-	return FALSE;
-
-  ret = v4l2_ioctl (m2m->output_object->video_fd, VIDIOC_STREAMON, &m2m->output_object->type);
-  if (ret < 0)
-	return FALSE;
-
-  ret = v4l2_ioctl (m2m->capture_object->video_fd, VIDIOC_STREAMON, &m2m->capture_object->type);
-  if (ret < 0)
+  m2m->source_allocator = gst_v4l2_allocator_new(GST_OBJECT (m2m->parent), m2m->source_obj->video_fd, &m2m->source_obj->format);
+  ret = gst_v4l2_allocator_start (m2m->source_allocator, source_nbufs, memory);
+  if (ret < source_nbufs)
 	return FALSE;
 
   m2m->dmabuf_allocator = gst_dmabuf_allocator_new ();
+  if (! m2m->dmabuf_allocator)
+    return FALSE;
+
+  ret = v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMON, &m2m->sink_obj->type);
+  if (ret < 0)
+	return FALSE;
+
+  ret = v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMON, &m2m->source_obj->type);
+  if (ret < 0)
+	return FALSE;
 
   return TRUE;
 }
@@ -186,7 +199,7 @@ gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * drect, struct v
   sel.flags = 0;
   sel.r = (*srect);
 
-  ret = v4l2_ioctl (m2m->output_object->video_fd, VIDIOC_S_SELECTION, &sel);
+  ret = v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_S_SELECTION, &sel);
   if (ret < 0)
 	return FALSE;
 
@@ -195,7 +208,7 @@ gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * drect, struct v
   sel.flags = 0;
   sel.r = (*drect);
 
-  ret = v4l2_ioctl (m2m->capture_object->video_fd, VIDIOC_S_SELECTION, &sel);
+  ret = v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_S_SELECTION, &sel);
   if (ret < 0)
 	return FALSE;
 
@@ -204,7 +217,7 @@ gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * drect, struct v
 
 
 GstBuffer *
-gst_v4l2_m2m_alloc (GstV4l2M2m * m2m, gboolean capture)
+gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
 {
   GstV4l2MemoryGroup * group;
   GstV4l2Allocator * allocator;
@@ -216,14 +229,8 @@ gst_v4l2_m2m_alloc (GstV4l2M2m * m2m, gboolean capture)
   if (!buf)
     return NULL;
 
-  if (capture) {
-    allocator = m2m->capture_allocator;
-  }
-  else {
-    allocator = m2m->output_allocator;
-  }
-
-  mode = get_io_mode(m2m, capture);
+  allocator = get_allocator(m2m, buf_type);
+  mode = get_io_mode(m2m, buf_type);
 
   switch (mode)
     {
@@ -244,7 +251,6 @@ gst_v4l2_m2m_alloc (GstV4l2M2m * m2m, gboolean capture)
 	return NULL;
 
   mem = group->mem[0];
-
   gst_buffer_append_memory (buf, mem);
 
   return buf;
@@ -254,7 +260,7 @@ gst_v4l2_m2m_alloc (GstV4l2M2m * m2m, gboolean capture)
 
 
 void
-gst_v4l2_m2m_free (GstV4l2M2m * m2m, gboolean capture, GstBuffer * buf)
+gst_v4l2_m2m_free_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type, GstBuffer * buf)
 {
   GstMemory * mem;
   GstV4l2IOMode mode;
@@ -263,14 +269,9 @@ gst_v4l2_m2m_free (GstV4l2M2m * m2m, gboolean capture, GstBuffer * buf)
 
   mem = gst_buffer_peek_memory (buf, 0);
 
-  if (capture) {
-    allocator = m2m->capture_allocator;
-  }
-  else {
-    allocator = m2m->output_allocator;
-  }
+  allocator = get_allocator(m2m, buf_type);
+  mode = get_io_mode(m2m, buf_type);
 
-  mode = get_io_mode(m2m, capture);
   switch (mode)
     {
     case GST_V4L2_IO_DMABUF_IMPORT:
@@ -286,9 +287,6 @@ gst_v4l2_m2m_free (GstV4l2M2m * m2m, gboolean capture, GstBuffer * buf)
 
 
 
-
-
-
 static gboolean
 copy(GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
 {
@@ -299,7 +297,6 @@ copy(GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
   GstMemory * smem;
 
   smem = gst_buffer_peek_memory (sbuf, 0);
-
   dmem = gst_buffer_peek_memory (dbuf, 0);
 
   if (! gst_is_v4l2_memory (dmem))
@@ -313,10 +310,10 @@ copy(GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
   if (!ok)
 	goto map_smem_failed;
 
-  if (idst.size != isrc.size)
+  if (idst.size != idst.size)
 	goto size_check_failed;
 
-  memcpy ((guint8 *) idst.data, (guint8 *) isrc.data, idst.size);
+  memcpy ((guint8 *) idst.data, (guint8 *) idst.data, idst.size);
 
   gst_memory_unmap (smem, &isrc);
   gst_memory_unmap (dmem, &idst);
@@ -346,7 +343,7 @@ import(GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
   dmem = (GstV4l2Memory *)gst_buffer_peek_memory (dbuf, 0);
   group=dmem->group;
 
-  ok = gst_v4l2_allocator_import_dmabuf (m2m->output_allocator, group, 1, &smem);
+  ok = gst_v4l2_allocator_import_dmabuf (m2m->sink_allocator, group, 1, &smem);
   if (! ok)
     return FALSE;
 
@@ -362,11 +359,11 @@ import(GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
 
 
 gboolean
-gst_v4l2_m2m_copy_or_import_source (GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
+gst_v4l2_m2m_copy_or_import_sink_buffer (GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
 {
   GstV4l2IOMode mode;
 
-  mode = get_io_mode(m2m, FALSE);
+  mode = get_io_mode(m2m, GST_V4L2_M2M_BUFTYPE_SINK);
 
   switch (mode)
     {
@@ -383,24 +380,24 @@ gst_v4l2_m2m_copy_or_import_source (GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffe
 
 
 void
-gst_v4l2_m2m_set_output_io_mode (GstV4l2M2m * m2m, GstV4l2IOMode mode)
+gst_v4l2_m2m_set_sink_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode)
 {
-  m2m->output_io_mode = mode;
-  m2m->output_object->req_mode = mode;
+  m2m->sink_iomode = mode;
+  m2m->sink_obj->req_mode = mode;
 }
 
 void
-gst_v4l2_m2m_set_capture_io_mode (GstV4l2M2m * m2m, GstV4l2IOMode mode)
+gst_v4l2_m2m_set_source_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode)
 {
-  m2m->capture_io_mode = mode;
-  m2m->capture_object->req_mode = mode;
+  m2m->source_iomode = mode;
+  m2m->source_obj->req_mode = mode;
 }
 
 void
 gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char * videodev)
 {
-  m2m->capture_object->videodev = g_strdup (videodev);
-  m2m->output_object->videodev = g_strdup (videodev);
+  m2m->source_obj->videodev = g_strdup (videodev);
+  m2m->sink_obj->videodev = g_strdup (videodev);
 }
 
 
@@ -424,7 +421,7 @@ gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
   dmem_b = gst_buffer_peek_memory (dbuf, 0);
   if (dmem_b->allocator == m2m->dmabuf_allocator) {
     dmem = (GstV4l2Memory *)gst_mini_object_get_qdata (GST_MINI_OBJECT (dmem_b), GST_V4L2_MEMORY_QUARK);
-    if (dmem->mem.allocator != (GstAllocator *)m2m->capture_allocator)
+    if (dmem->mem.allocator != (GstAllocator *)m2m->source_allocator)
       return FALSE;
   }
 
@@ -434,19 +431,19 @@ gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
   else
     dmem = (GstV4l2Memory *)dmem_b;
 
-  ok = gst_v4l2_allocator_qbuf (m2m->output_allocator, smem->group);
+  ok = gst_v4l2_allocator_qbuf (m2m->sink_allocator, smem->group);
   if (!ok)
 	return FALSE;
 
-  ok = gst_v4l2_allocator_qbuf (m2m->capture_allocator, dmem->group);
+  ok = gst_v4l2_allocator_qbuf (m2m->source_allocator, dmem->group);
   if (!ok)
 	return FALSE;
 
-  flow = gst_v4l2_allocator_dqbuf (m2m->output_allocator, &smgroup);
+  flow = gst_v4l2_allocator_dqbuf (m2m->sink_allocator, &smgroup);
   if (flow != GST_FLOW_OK)
 	return FALSE;
 
-  flow = gst_v4l2_allocator_dqbuf (m2m->capture_allocator, &dmgroup);
+  flow = gst_v4l2_allocator_dqbuf (m2m->source_allocator, &dmgroup);
   if (flow != GST_FLOW_OK)
 	return FALSE;
 
@@ -471,11 +468,11 @@ gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
 gboolean
 gst_v4l2_m2m_open (GstV4l2M2m * m2m)
 {
-  if (!gst_v4l2_object_open (m2m->output_object))
+  if (!gst_v4l2_object_open (m2m->sink_obj))
     return FALSE;
 
-  if (!gst_v4l2_object_open_shared (m2m->capture_object, m2m->output_object)) {
-    gst_v4l2_object_close (m2m->output_object);
+  if (!gst_v4l2_object_open_shared (m2m->source_obj, m2m->sink_obj)) {
+    gst_v4l2_object_close (m2m->sink_obj);
     return FALSE;
   }
 
@@ -485,27 +482,27 @@ gst_v4l2_m2m_open (GstV4l2M2m * m2m)
 void
 gst_v4l2_m2m_close (GstV4l2M2m * m2m)
 {
-  gst_v4l2_object_close (m2m->output_object);
-  gst_v4l2_object_close (m2m->capture_object);
+  gst_v4l2_object_close (m2m->sink_obj);
+  gst_v4l2_object_close (m2m->source_obj);
 }
 
 void
 gst_v4l2_m2m_unlock (GstV4l2M2m * m2m)
 {
-  gst_v4l2_object_unlock (m2m->output_object);
-  gst_v4l2_object_unlock (m2m->capture_object);
+  gst_v4l2_object_unlock (m2m->sink_obj);
+  gst_v4l2_object_unlock (m2m->source_obj);
 }
 
 void
 gst_v4l2_m2m_unlock_stop (GstV4l2M2m * m2m)
 {
-  gst_v4l2_object_unlock_stop (m2m->output_object);
-  gst_v4l2_object_unlock_stop (m2m->capture_object);
+  gst_v4l2_object_unlock_stop (m2m->sink_obj);
+  gst_v4l2_object_unlock_stop (m2m->source_obj);
 }
 
 void
 gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
 {
-  gst_v4l2_object_stop (m2m->output_object);
-  gst_v4l2_object_stop (m2m->capture_object);
+  gst_v4l2_object_stop (m2m->sink_obj);
+  gst_v4l2_object_stop (m2m->source_obj);
 }

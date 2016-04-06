@@ -294,11 +294,11 @@ gst_v4l2_compositor_set_property (GObject * object,
       break;
     case PROP_OUTPUT_IO_MODE:
       self->output_io_mode = g_value_get_enum (value);
-      gst_v4l2_m2m_set_output_io_mode (self->m2m, self->output_io_mode);
+      gst_v4l2_m2m_set_sink_iomode (self->m2m, self->output_io_mode);
       break;
     case PROP_CAPTURE_IO_MODE:
       self->capture_io_mode = g_value_get_enum (value);
-      gst_v4l2_m2m_set_capture_io_mode (self->m2m, self->capture_io_mode);
+      gst_v4l2_m2m_set_source_iomode (self->m2m, self->capture_io_mode);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -391,17 +391,17 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
 {
   GList *l;
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
-  GstBuffer * sbuf_pad;
-  GstBuffer * sbuf;
-  GstBuffer * dbuf;
+  GstBuffer * external_sink_pad;
+  GstBuffer * sink_buf;
+  GstBuffer * source_buf;
   gboolean ok;
-  struct v4l2_rect srect;
-  struct v4l2_rect drect;
+  struct v4l2_rect sink_rect;
+  struct v4l2_rect source_rect;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
 
-  sbuf = NULL;
-  dbuf = NULL;
+  sink_buf = NULL;
+  source_buf = NULL;
   (*outbuf) = NULL;
   GST_OBJECT_LOCK (vagg);
 
@@ -412,48 +412,48 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
       goto not_ready;
   }
 
-  dbuf = gst_v4l2_m2m_alloc (self->m2m, TRUE);
-  if (!dbuf) {
-    GST_ERROR_OBJECT (self, "gst_v4l2_m2m_alloc() for dbuf failed");
+  source_buf = gst_v4l2_m2m_alloc_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
+  if (!source_buf) {
+    GST_ERROR_OBJECT (self, "gst_v4l2_m2m_alloc_buffer() for source_buf failed");
     goto failed;
   }
 
   for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
     pad = l->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    sbuf_pad = pad->buffer;
+    external_sink_pad = pad->buffer;
 
-    sbuf = gst_v4l2_m2m_alloc (self->m2m, FALSE);
-    if (!sbuf) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_alloc() for sbuf failed");
+    sink_buf = gst_v4l2_m2m_alloc_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
+    if (!sink_buf) {
+      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_alloc_buffer() for sink_buf failed");
       goto failed;
     }
 
-    ok = gst_v4l2_m2m_copy_or_import_source (self->m2m, sbuf, sbuf_pad);
+    ok = gst_v4l2_m2m_copy_or_import_sink_buffer (self->m2m, sink_buf, external_sink_pad);
     if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_copy_or_import_source() failed");
+      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_copy_or_import_sink_buffer() failed");
       goto failed;
     }
 
-    _get_src_selection_rect(cpad, &srect);
-    _get_dst_selection_rect(cpad, &drect);
+    _get_src_selection_rect(cpad, &sink_rect);
+    _get_dst_selection_rect(cpad, &source_rect);
 
-    ok = gst_v4l2_m2m_set_selection (self->m2m, &drect, &srect);
+    ok = gst_v4l2_m2m_set_selection (self->m2m, &source_rect, &sink_rect);
     if (!ok) {
       GST_ERROR_OBJECT (self, "gst_v4l2_m2m_set_selection() failed");
       goto failed;
     }
 
-    ok = gst_v4l2_m2m_process (self->m2m, dbuf, sbuf);
+    ok = gst_v4l2_m2m_process (self->m2m, source_buf, sink_buf);
     if (!ok) {
       GST_ERROR_OBJECT (self, "gst_v4l2_m2m_process() failed");
       goto failed;
     }
 
-    gst_v4l2_m2m_free (self->m2m, FALSE, sbuf);
+    gst_v4l2_m2m_free_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, sink_buf);
   }
 
-  (*outbuf) = dbuf;
+  (*outbuf) = source_buf;
   GST_OBJECT_UNLOCK (vagg);
   return GST_FLOW_OK;
 
@@ -463,10 +463,10 @@ not_ready:
 
 failed:
   GST_OBJECT_UNLOCK (vagg);
-  if (sbuf)
-    gst_v4l2_m2m_free (self->m2m, FALSE, sbuf);
-  if (dbuf)
-    gst_v4l2_m2m_free (self->m2m, TRUE, dbuf);
+  if (sink_buf)
+    gst_v4l2_m2m_free_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SINK, sink_buf);
+  if (source_buf)
+    gst_v4l2_m2m_free_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, source_buf);
   return GST_FLOW_ERROR;
 }
 
@@ -483,8 +483,13 @@ static gboolean
 gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     GstCaps * caps)
 {
+  GList * l;
   GstV4l2Compositor * self = GST_V4L2_COMPOSITOR (vagg);
   gboolean result = TRUE;
+  int padn;
+  GstCaps * sinkcaps;
+  GstCaps * sinkcaps_prev;
+  gboolean ok;
 
   static gint count = 0;
   if (count != 0)
@@ -493,17 +498,54 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
 
   GST_DEBUG_OBJECT (self, "Use negotiated caps");
 
-  gst_caps_replace (&self->outcaps, caps);
+  gst_caps_replace (&self->srccaps, caps);
+
+  if (!gst_caps_is_fixed (caps))
+    goto srccaps_not_fixed;
+
+  sinkcaps_prev = NULL;
+
+  printf("caps[OUT] = %s\n", gst_caps_to_string(caps));
 
   /** Set format **/
-  if (!gst_v4l2_m2m_setup_allocator (self->m2m, caps, 8, 8))
-    goto outcaps_failed;
+  GST_OBJECT_LOCK (vagg);
+  padn = 0;
+  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+    GstPad *pad = l->data;
 
-  /* TODO set_selection */
+    sinkcaps = gst_pad_get_current_caps (pad);
+    if (!gst_caps_is_fixed (sinkcaps))
+      goto sinkcaps_not_fixed;
+
+    if ((sinkcaps_prev != NULL) && (!gst_caps_is_equal(sinkcaps, sinkcaps_prev)))
+      goto sinkcaps_not_equal;
+
+    printf("caps[PAD#%d] = %s\n", padn, gst_caps_to_string(sinkcaps));
+    padn++;
+    sinkcaps_prev = sinkcaps;
+  }
+  GST_OBJECT_UNLOCK (vagg);
+
+  ok = gst_v4l2_m2m_setup (self->m2m, self->srccaps, 8, sinkcaps, 8);
+  if (!ok)
+    goto setup_failed;
+
   goto done;
 
-outcaps_failed:
-  GST_ERROR_OBJECT (self, "failed to set output caps: %" GST_PTR_FORMAT, caps);
+srccaps_not_fixed:
+  GST_ERROR_OBJECT (self, "source caps not fixed: %" GST_PTR_FORMAT, self->srccaps);
+  goto failed;
+
+sinkcaps_not_fixed:
+  GST_ERROR_OBJECT (self, "sink caps from source pad#%d not fixed: %" GST_PTR_FORMAT, padn, sinkcaps);
+  goto failed;
+
+sinkcaps_not_equal:
+  GST_ERROR_OBJECT (self, "sink caps differs (pad#%d vs pad#%d): %" GST_PTR_FORMAT "!= %" GST_PTR_FORMAT, padn-1, padn, sinkcaps_prev, sinkcaps);
+  goto failed;
+
+setup_failed:
+  GST_ERROR_OBJECT (self, "gst_v4l2_m2m_setup() failed");
   goto failed;
 
 failed:
@@ -529,35 +571,29 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
     goto failure;
 
   GST_OBJECT_LOCK (vagg);
-  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
+  for (l = GST_ELEMENT (vagg)->srcpads; l; l = l->next) {
 
   }
   GST_OBJECT_UNLOCK (vagg);
 
-  self->probed_sinkcaps = gst_v4l2_object_get_caps (self->m2m->output_object,
+  self->probed_sinkcaps = gst_v4l2_object_get_caps (self->m2m->sink_obj,
       gst_v4l2_object_get_raw_caps ());
 
   if (gst_caps_is_empty (self->probed_sinkcaps))
-    goto no_input_format;
+    goto probed_sinkcaps_is_empty;
 
-  self->probed_srccaps = gst_v4l2_object_get_caps (self->m2m->capture_object,
+  self->probed_srccaps = gst_v4l2_object_get_caps (self->m2m->source_obj,
       gst_v4l2_object_get_raw_caps ());
 
   if (gst_caps_is_empty (self->probed_srccaps))
-    goto no_output_format;
+    goto probed_srccaps_is_empty;
 
   return TRUE;
 
-no_input_format:
-  GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
-      ("Converter on device %s has no supported input format",
-          self->m2m->output_object->videodev), (NULL));
+probed_sinkcaps_is_empty:
   goto failure;
 
-no_output_format:
-  GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
-      ("Converter on device %s has no supported output format",
-          self->m2m->capture_object->videodev), (NULL));
+probed_srccaps_is_empty:
   goto failure;
 
 failure:
@@ -617,7 +653,7 @@ gst_v4l2_compositor_stop (GstV4l2Aggregator * agg)
   GST_OBJECT_UNLOCK (vagg);
 
   gst_v4l2_m2m_stop (self->m2m);
-  gst_caps_replace (&self->outcaps, NULL);
+  gst_caps_replace (&self->srccaps, NULL);
 
   return TRUE;
 }

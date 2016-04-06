@@ -35,14 +35,26 @@ typedef struct _GstV4l2M2m GstV4l2M2m;
 
 struct _GstV4l2M2m {
   GstElement * parent;
-  GstV4l2Object * output_object;
-  GstV4l2Object * capture_object;
-  GstV4l2Allocator * output_allocator;
-  GstV4l2Allocator * capture_allocator;
+  GstV4l2Object * source_obj;
+  GstV4l2Object * sink_obj;
+  GstV4l2Allocator * source_allocator;
+  GstV4l2Allocator * sink_allocator;
   GstAllocator * dmabuf_allocator;
-  GstV4l2IOMode output_io_mode;
-  GstV4l2IOMode capture_io_mode;
+  GstV4l2IOMode source_iomode;
+  GstV4l2IOMode sink_iomode;
 };
+
+enum GstV4l2M2mBufferType {
+  GST_V4L2_M2M_BUFTYPE_SINK,
+  GST_V4L2_M2M_BUFTYPE_SOURCE,
+};
+
+
+
+
+
+
+
 
 /* create/destroy */
 GstV4l2M2m*  gst_v4l2_m2m_new       (GstElement * element,
@@ -53,8 +65,8 @@ void         gst_v4l2_m2m_destroy   (GstV4l2M2m * m2m);
 
 /* properties */
 
-void         gst_v4l2_m2m_set_output_io_mode (GstV4l2M2m * m2m, GstV4l2IOMode mode);
-void         gst_v4l2_m2m_set_capture_io_mode (GstV4l2M2m * m2m, GstV4l2IOMode mode);
+void         gst_v4l2_m2m_set_source_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode);
+void         gst_v4l2_m2m_set_sink_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode);
 void         gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char * videodev);
 
 /* open/close */
@@ -67,18 +79,18 @@ void         gst_v4l2_m2m_unlock_stop    (GstV4l2M2m * m2m);
 void         gst_v4l2_m2m_stop           (GstV4l2M2m * m2m);
 
 
-/* specific */
+/* specific operations */
 
-gboolean     gst_v4l2_m2m_setup_allocator (GstV4l2M2m * m2m, GstCaps * caps, int output_nbufs, int capture_nbufs);
+gboolean     gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * src_caps, int src_nbufs, GstCaps * sink_caps, int sink_nbufs);
 
-GstBuffer *  gst_v4l2_m2m_alloc (GstV4l2M2m * m2m, gboolean capture_buf);
+GstBuffer *  gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type);
 
-void         gst_v4l2_m2m_free (GstV4l2M2m * m2m, gboolean capture_buf, GstBuffer * sbuf);
+void         gst_v4l2_m2m_free_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type, GstBuffer * buf);
 
-gboolean     gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf);
+gboolean     gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * source_buf, GstBuffer * sink_buf);
 
-gboolean     gst_v4l2_m2m_copy_or_import_source(GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf);
+gboolean     gst_v4l2_m2m_copy_or_import_sink_buffer(GstV4l2M2m * m2m, GstBuffer * buf, GstBuffer * external_buf);
 
-gboolean     gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * drect, struct v4l2_rect * srect);
+gboolean     gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * source_rect, struct v4l2_rect * sink_rect);
 
 #endif /* __GST_V4L2_M2M_H__ */

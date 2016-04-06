@@ -57,7 +57,7 @@ struct _GstV4l2Compositor
   char *           videodev;
   GstCaps *        probed_sinkcaps;
   GstCaps *        probed_srccaps;
-  GstCaps *        outcaps;
+  GstCaps *        srccaps;
 };
 
 struct _GstV4l2CompositorClass
