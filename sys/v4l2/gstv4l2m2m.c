@@ -310,10 +310,10 @@ copy(GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
   if (!ok)
 	goto map_smem_failed;
 
-  if (idst.size != idst.size)
+  if (idst.size != isrc.size)
 	goto size_check_failed;
 
-  memcpy ((guint8 *) idst.data, (guint8 *) idst.data, idst.size);
+  memcpy ((guint8 *) idst.data, (guint8 *) isrc.data, idst.size);
 
   gst_memory_unmap (smem, &isrc);
   gst_memory_unmap (dmem, &idst);
