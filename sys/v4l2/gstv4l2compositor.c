@@ -505,8 +505,6 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
 
   sinkcaps_prev = NULL;
 
-  printf("caps[OUT] = %s\n", gst_caps_to_string(caps));
-
   /** Set format **/
   GST_OBJECT_LOCK (vagg);
   padn = 0;
@@ -520,7 +518,6 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     if ((sinkcaps_prev != NULL) && (!gst_caps_is_equal(sinkcaps, sinkcaps_prev)))
       goto sinkcaps_not_equal;
 
-    printf("caps[PAD#%d] = %s\n", padn, gst_caps_to_string(sinkcaps));
     padn++;
     sinkcaps_prev = sinkcaps;
   }
@@ -541,7 +538,7 @@ sinkcaps_not_fixed:
   goto failed;
 
 sinkcaps_not_equal:
-  GST_ERROR_OBJECT (self, "sink caps differs (pad#%d vs pad#%d): %" GST_PTR_FORMAT "!= %" GST_PTR_FORMAT, padn-1, padn, sinkcaps_prev, sinkcaps);
+  GST_ERROR_OBJECT (self, "sink caps differs (pad#%d vs pad#%d):\n %" GST_PTR_FORMAT "\n %" GST_PTR_FORMAT, padn-1, padn, sinkcaps_prev, sinkcaps);
   goto failed;
 
 setup_failed:
