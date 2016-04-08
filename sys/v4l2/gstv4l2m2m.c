@@ -188,6 +188,17 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps, int source_nbufs, G
   return TRUE;
 }
 
+
+GstVideoInfo *
+gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
+{
+  if(buf_type == GST_V4L2_M2M_BUFTYPE_SOURCE)
+    return &m2m->source_obj->info;
+  else
+    return &m2m->sink_obj->info;
+}
+
+
 gboolean
 gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * drect, struct v4l2_rect * srect)
 {
