@@ -358,30 +358,34 @@ gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
 }
 
 
-static void _get_dst_selection_rect(GstV4l2CompositorPad * pad, struct v4l2_rect * rect)
+static void _get_dst_selection_rect(GstV4l2Compositor *self, GstV4l2CompositorPad * pad, struct v4l2_rect * rect)
 {
-  GstV4l2VideoAggregatorPad *vagg_pad = GST_V4L2_VIDEO_AGGREGATOR_PAD (pad);
+  GstVideoInfo * info;
 
   rect->left = pad->xpos;
   rect->top = pad->ypos;
+
+  info = gst_v4l2_m2m_get_video_info(self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
   if (pad->width == DEFAULT_PAD_WIDTH)
-	rect->width = vagg_pad->info.width;
+    rect->width = info->width;
   else
-	rect->width = pad->width;
+    rect->width = pad->width;
+
   if (pad->height == DEFAULT_PAD_HEIGHT)
-	rect->height = vagg_pad->info.height;
+	rect->height = info->height;
   else
 	rect->height = pad->height;
 }
 
-static void _get_src_selection_rect(GstV4l2CompositorPad * pad, struct v4l2_rect * rect)
+static void _get_src_selection_rect(GstV4l2Compositor *self, struct v4l2_rect * rect)
 {
-  GstV4l2VideoAggregatorPad *vagg_pad = GST_V4L2_VIDEO_AGGREGATOR_PAD (pad);
+  GstVideoInfo * info;
 
+  info = gst_v4l2_m2m_get_video_info(self->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
   rect->left = 0;
   rect->top = 0;
-  rect->width = vagg_pad->info.width;
-  rect->height = vagg_pad->info.height;
+  rect->width = info->width;
+  rect->height = info->height;
 }
 
 
@@ -435,8 +439,8 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
       goto failed;
     }
 
-    _get_src_selection_rect(cpad, &sink_rect);
-    _get_dst_selection_rect(cpad, &source_rect);
+    _get_src_selection_rect(self, &sink_rect);
+    _get_dst_selection_rect(self, cpad, &source_rect);
 
     ok = gst_v4l2_m2m_set_selection (self->m2m, &source_rect, &sink_rect);
     if (!ok) {
