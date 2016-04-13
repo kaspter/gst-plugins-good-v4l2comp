@@ -51,13 +51,6 @@ enum GstV4l2M2mBufferType
   GST_V4L2_M2M_BUFTYPE_SOURCE,
 };
 
-
-
-
-
-
-
-
 /* create/destroy */
 GstV4l2M2m *gst_v4l2_m2m_new (GstElement * element,
     const char *default_device, GstV4l2UpdateFpsFunction update_fps_func);

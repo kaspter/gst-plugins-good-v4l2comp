@@ -464,7 +464,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
       goto failed;
     }
 
-    gst_v4l2_m2m_free_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, sink_buf);
+    gst_v4l2_m2m_free_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SINK, sink_buf);
   }
 
   (*outbuf) = source_buf;

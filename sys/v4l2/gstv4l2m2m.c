@@ -277,9 +277,6 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
   return buf;
 }
 
-
-
-
 void
 gst_v4l2_m2m_free_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type,
     GstBuffer * buf)
@@ -305,8 +302,6 @@ gst_v4l2_m2m_free_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type,
 
   gst_buffer_unref (buf);
 }
-
-
 
 static gboolean
 copy (GstV4l2M2m * m2m, GstBuffer * dbuf, GstBuffer * sbuf)
@@ -507,6 +502,13 @@ gst_v4l2_m2m_close (GstV4l2M2m * m2m)
 {
   gst_v4l2_object_close (m2m->sink_obj);
   gst_v4l2_object_close (m2m->source_obj);
+
+  gst_v4l2_allocator_flush (m2m->sink_allocator);
+  gst_v4l2_allocator_flush (m2m->source_allocator);
+
+  if (m2m->dmabuf_allocator)
+    gst_object_unref (m2m->dmabuf_allocator);
+  m2m->dmabuf_allocator = NULL;
 }
 
 void
@@ -527,5 +529,11 @@ void
 gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
 {
   gst_v4l2_object_stop (m2m->sink_obj);
+  v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMOFF, &m2m->sink_obj->type);
   gst_v4l2_object_stop (m2m->source_obj);
+  v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMOFF,
+      &m2m->source_obj->type);
+
+  gst_v4l2_allocator_stop (m2m->sink_allocator);
+  gst_v4l2_allocator_stop (m2m->source_allocator);
 }
