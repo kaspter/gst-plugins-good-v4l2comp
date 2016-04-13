@@ -120,7 +120,8 @@ _mixer_pad_get_output_size (GstV4l2Compositor * comp,
     GstV4l2CompositorPad * comp_pad, gint * width, gint * height)
 {
   GstV4l2VideoAggregator *vagg = GST_V4L2_VIDEO_AGGREGATOR (comp);
-  GstV4l2VideoAggregatorPad *vagg_pad = GST_V4L2_VIDEO_AGGREGATOR_PAD (comp_pad);
+  GstV4l2VideoAggregatorPad *vagg_pad =
+      GST_V4L2_VIDEO_AGGREGATOR_PAD (comp_pad);
   gint pad_width, pad_height;
   guint dar_n, dar_d;
 
@@ -261,8 +262,7 @@ gst_v4l2_compositor_get_property (GObject * object,
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
-  switch (prop_id)
-    {
+  switch (prop_id) {
     case PROP_DEVICE:
       g_value_set_string (value, self->videodev);
       break;
@@ -285,8 +285,7 @@ gst_v4l2_compositor_set_property (GObject * object,
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
-  switch (prop_id)
-    {
+  switch (prop_id) {
     case PROP_DEVICE:
       g_free (self->videodev);
       self->videodev = g_value_dup_string (value);
@@ -303,11 +302,12 @@ gst_v4l2_compositor_set_property (GObject * object,
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
-    }
+  }
 }
 
 #define gst_v4l2_compositor_parent_class parent_class
-G_DEFINE_TYPE (GstV4l2Compositor, gst_v4l2_compositor, GST_TYPE_V4L2_VIDEO_AGGREGATOR);
+G_DEFINE_TYPE (GstV4l2Compositor, gst_v4l2_compositor,
+    GST_TYPE_V4L2_VIDEO_AGGREGATOR);
 
 static GstCaps *
 gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
@@ -329,8 +329,8 @@ gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
     gint this_width, this_height;
     gint width, height;
 
-    _mixer_pad_get_output_size (GST_V4L2_COMPOSITOR (vagg), compositor_pad, &width,
-        &height);
+    _mixer_pad_get_output_size (GST_V4L2_COMPOSITOR (vagg), compositor_pad,
+        &width, &height);
 
     if (width == 0 || height == 0)
       continue;
@@ -358,30 +358,33 @@ gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
 }
 
 
-static void _get_dst_selection_rect(GstV4l2Compositor *self, GstV4l2CompositorPad * pad, struct v4l2_rect * rect)
+static void
+_get_dst_selection_rect (GstV4l2Compositor * self, GstV4l2CompositorPad * pad,
+    struct v4l2_rect *rect)
 {
-  GstVideoInfo * info;
+  GstVideoInfo *info;
 
   rect->left = pad->xpos;
   rect->top = pad->ypos;
 
-  info = gst_v4l2_m2m_get_video_info(self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
+  info = gst_v4l2_m2m_get_video_info (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
   if (pad->width == DEFAULT_PAD_WIDTH)
     rect->width = info->width;
   else
     rect->width = pad->width;
 
   if (pad->height == DEFAULT_PAD_HEIGHT)
-	rect->height = info->height;
+    rect->height = info->height;
   else
-	rect->height = pad->height;
+    rect->height = pad->height;
 }
 
-static void _get_src_selection_rect(GstV4l2Compositor *self, struct v4l2_rect * rect)
+static void
+_get_src_selection_rect (GstV4l2Compositor * self, struct v4l2_rect *rect)
 {
-  GstVideoInfo * info;
+  GstVideoInfo *info;
 
-  info = gst_v4l2_m2m_get_video_info(self->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
+  info = gst_v4l2_m2m_get_video_info (self->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
   rect->left = 0;
   rect->top = 0;
   rect->width = info->width;
@@ -391,13 +394,14 @@ static void _get_src_selection_rect(GstV4l2Compositor *self, struct v4l2_rect * 
 
 
 static GstFlowReturn
-gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer ** outbuf)
+gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
+    GstBuffer ** outbuf)
 {
   GList *l;
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
-  GstBuffer * external_sink_pad;
-  GstBuffer * sink_buf;
-  GstBuffer * source_buf;
+  GstBuffer *external_sink_pad;
+  GstBuffer *sink_buf;
+  GstBuffer *source_buf;
   gboolean ok;
   struct v4l2_rect sink_rect;
   struct v4l2_rect source_rect;
@@ -416,9 +420,11 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
       goto not_ready;
   }
 
-  source_buf = gst_v4l2_m2m_alloc_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
+  source_buf =
+      gst_v4l2_m2m_alloc_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
   if (!source_buf) {
-    GST_ERROR_OBJECT (self, "gst_v4l2_m2m_alloc_buffer() for source_buf failed");
+    GST_ERROR_OBJECT (self,
+        "gst_v4l2_m2m_alloc_buffer() for source_buf failed");
     goto failed;
   }
 
@@ -429,18 +435,21 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg, GstBuffer 
 
     sink_buf = gst_v4l2_m2m_alloc_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
     if (!sink_buf) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_alloc_buffer() for sink_buf failed");
+      GST_ERROR_OBJECT (self,
+          "gst_v4l2_m2m_alloc_buffer() for sink_buf failed");
       goto failed;
     }
 
-    ok = gst_v4l2_m2m_copy_or_import_sink_buffer (self->m2m, sink_buf, external_sink_pad);
+    ok = gst_v4l2_m2m_copy_or_import_sink_buffer (self->m2m, sink_buf,
+        external_sink_pad);
     if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_copy_or_import_sink_buffer() failed");
+      GST_ERROR_OBJECT (self,
+          "gst_v4l2_m2m_copy_or_import_sink_buffer() failed");
       goto failed;
     }
 
-    _get_src_selection_rect(self, &sink_rect);
-    _get_dst_selection_rect(self, cpad, &source_rect);
+    _get_src_selection_rect (self, &sink_rect);
+    _get_dst_selection_rect (self, cpad, &source_rect);
 
     ok = gst_v4l2_m2m_set_selection (self->m2m, &source_rect, &sink_rect);
     if (!ok) {
@@ -470,12 +479,14 @@ failed:
   if (sink_buf)
     gst_v4l2_m2m_free_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SINK, sink_buf);
   if (source_buf)
-    gst_v4l2_m2m_free_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, source_buf);
+    gst_v4l2_m2m_free_buffer (self->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE,
+        source_buf);
   return GST_FLOW_ERROR;
 }
 
 static GstFlowReturn
-gst_v4l2_compositor_aggregate_frames (GstV4l2VideoAggregator * vagg, GstBuffer * outbuf)
+gst_v4l2_compositor_aggregate_frames (GstV4l2VideoAggregator * vagg,
+    GstBuffer * outbuf)
 {
   GST_DEBUG_OBJECT (vagg, "Aggregate frames");
 
@@ -487,12 +498,12 @@ static gboolean
 gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     GstCaps * caps)
 {
-  GList * l;
-  GstV4l2Compositor * self = GST_V4L2_COMPOSITOR (vagg);
+  GList *l;
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
   gboolean result = TRUE;
   int padn;
-  GstCaps * sinkcaps;
-  GstCaps * sinkcaps_prev;
+  GstCaps *sinkcaps;
+  GstCaps *sinkcaps_prev;
   gboolean ok;
 
   static gint count = 0;
@@ -519,7 +530,8 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     if (!gst_caps_is_fixed (sinkcaps))
       goto sinkcaps_not_fixed;
 
-    if ((sinkcaps_prev != NULL) && (!gst_caps_is_equal(sinkcaps, sinkcaps_prev)))
+    if ((sinkcaps_prev != NULL)
+        && (!gst_caps_is_equal (sinkcaps, sinkcaps_prev)))
       goto sinkcaps_not_equal;
 
     padn++;
@@ -534,15 +546,20 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   goto done;
 
 srccaps_not_fixed:
-  GST_ERROR_OBJECT (self, "source caps not fixed: %" GST_PTR_FORMAT, self->srccaps);
+  GST_ERROR_OBJECT (self, "source caps not fixed: %" GST_PTR_FORMAT,
+      self->srccaps);
   goto failed;
 
 sinkcaps_not_fixed:
-  GST_ERROR_OBJECT (self, "sink caps from source pad#%d not fixed: %" GST_PTR_FORMAT, padn, sinkcaps);
+  GST_ERROR_OBJECT (self,
+      "sink caps from source pad#%d not fixed: %" GST_PTR_FORMAT, padn,
+      sinkcaps);
   goto failed;
 
 sinkcaps_not_equal:
-  GST_ERROR_OBJECT (self, "sink caps differs (pad#%d vs pad#%d):\n %" GST_PTR_FORMAT "\n %" GST_PTR_FORMAT, padn-1, padn, sinkcaps_prev, sinkcaps);
+  GST_ERROR_OBJECT (self,
+      "sink caps differs (pad#%d vs pad#%d):\n %" GST_PTR_FORMAT "\n %"
+      GST_PTR_FORMAT, padn - 1, padn, sinkcaps_prev, sinkcaps);
   goto failed;
 
 setup_failed:
@@ -557,14 +574,13 @@ done:
   return result;
 }
 
-static void
-gst_v4l2_compositor_close (GstV4l2Compositor * self);
+static void gst_v4l2_compositor_close (GstV4l2Compositor * self);
 
 static gboolean
 gst_v4l2_compositor_open (GstV4l2Compositor * self)
 {
-  GList * l;
-  GstV4l2VideoAggregator * vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
+  GList *l;
+  GstV4l2VideoAggregator *vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
 
   GST_DEBUG_OBJECT (self, "Opening");
 
@@ -605,8 +621,8 @@ failure:
 static void
 gst_v4l2_compositor_unlock (GstV4l2Compositor * self)
 {
-  GList * l;
-  GstV4l2VideoAggregator * vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
+  GList *l;
+  GstV4l2VideoAggregator *vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
 
   GST_DEBUG_OBJECT (self, "Unlock");
 
@@ -622,8 +638,8 @@ gst_v4l2_compositor_unlock (GstV4l2Compositor * self)
 static void
 gst_v4l2_compositor_close (GstV4l2Compositor * self)
 {
-  GList * l;
-  GstV4l2VideoAggregator * vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
+  GList *l;
+  GstV4l2VideoAggregator *vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
 
   GST_DEBUG_OBJECT (self, "Closing");
 
@@ -641,9 +657,9 @@ gst_v4l2_compositor_close (GstV4l2Compositor * self)
 static gboolean
 gst_v4l2_compositor_stop (GstV4l2Aggregator * agg)
 {
-  GList * l;
-  GstV4l2Compositor * self = GST_V4L2_COMPOSITOR (agg);
-  GstV4l2VideoAggregator * vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
+  GList *l;
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (agg);
+  GstV4l2VideoAggregator *vagg = GST_V4L2_VIDEO_AGGREGATOR (self);
 
   GST_DEBUG_OBJECT (self, "Stop");
 
@@ -665,7 +681,8 @@ gst_v4l2_compositor_sink_query (GstV4l2Aggregator * agg,
 {
   switch (GST_QUERY_TYPE (query)) {
     default:
-      return GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_query (agg, bpad, query);
+      return GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_query (agg, bpad,
+          query);
   }
 }
 
@@ -674,32 +691,30 @@ gst_v4l2_compositor_sink_event (GstV4l2Aggregator * agg,
     GstV4l2AggregatorPad * bpad, GstEvent * event)
 {
   gboolean ret;
-  GstV4l2Compositor * self = GST_V4L2_COMPOSITOR (agg);
+  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (agg);
 
-  switch (GST_EVENT_TYPE (event))
-    {
+  switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_FLUSH_START:
       GST_DEBUG_OBJECT (self, "flush start");
-      gst_v4l2_m2m_unlock(self->m2m);
+      gst_v4l2_m2m_unlock (self->m2m);
       break;
 
     default:
       break;
-    }
+  }
 
   ret = GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_event (agg, bpad, event);
 
-  switch (GST_EVENT_TYPE (event))
-    {
+  switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_FLUSH_STOP:
       /* Buffer should be back now */
       GST_DEBUG_OBJECT (self, "flush stop");
-      gst_v4l2_m2m_unlock_stop(self->m2m);
+      gst_v4l2_m2m_unlock_stop (self->m2m);
       break;
 
     default:
       break;
-    }
+  }
 
   return ret;
 }
@@ -707,14 +722,14 @@ gst_v4l2_compositor_sink_event (GstV4l2Aggregator * agg,
 static GstFlowReturn
 gst_v4l2_compositor_flush (GstV4l2Aggregator * agg)
 {
-   return GST_V4L2_AGGREGATOR_CLASS (parent_class)->flush (agg);
+  return GST_V4L2_AGGREGATOR_CLASS (parent_class)->flush (agg);
 }
 
 static GstV4l2AggregatorPad *
 gst_v4l2_compositor_create_new_pad (GstV4l2Aggregator * agg,
     GstPadTemplate * templ, const gchar * req_name, const GstCaps * caps)
 {
-  GstV4l2AggregatorPad * pad;
+  GstV4l2AggregatorPad *pad;
 
   pad = GST_V4L2_AGGREGATOR_CLASS (parent_class)->create_new_pad (agg, templ,
       req_name, caps);

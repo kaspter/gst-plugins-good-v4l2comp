@@ -17,7 +17,7 @@
  * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
- 
+
 #ifndef __GST_V4L2_COMPOSITOR_H__
 #define __GST_V4L2_COMPOSITOR_H__
 
@@ -28,7 +28,6 @@
 
 
 G_BEGIN_DECLS
-
 #define GST_TYPE_V4L2_COMPOSITOR (gst_v4l2_compositor_get_type())
 #define GST_V4L2_COMPOSITOR(obj) \
         (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_V4L2_COMPOSITOR, GstV4l2Compositor))
@@ -38,7 +37,6 @@ G_BEGIN_DECLS
         (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_V4L2_COMPOSITOR))
 #define GST_IS_V4L2_COMPOSITOR_CLASS(klass) \
         (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_V4L2_COMPOSITOR))
-
 typedef struct _GstV4l2Compositor GstV4l2Compositor;
 typedef struct _GstV4l2CompositorClass GstV4l2CompositorClass;
 
@@ -51,13 +49,13 @@ struct _GstV4l2Compositor
 {
   GstV4l2VideoAggregator videoaggregator;
 
-  GstV4l2M2m *     m2m;
-  GstV4l2IOMode    output_io_mode;
-  GstV4l2IOMode    capture_io_mode;
-  char *           videodev;
-  GstCaps *        probed_sinkcaps;
-  GstCaps *        probed_srccaps;
-  GstCaps *        srccaps;
+  GstV4l2M2m *m2m;
+  GstV4l2IOMode output_io_mode;
+  GstV4l2IOMode capture_io_mode;
+  char *videodev;
+  GstCaps *probed_sinkcaps;
+  GstCaps *probed_srccaps;
+  GstCaps *srccaps;
 };
 
 struct _GstV4l2CompositorClass
@@ -67,7 +65,8 @@ struct _GstV4l2CompositorClass
 
 GType gst_v4l2_compositor_get_type (void);
 
-void gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class);
+void gst_v4l2_compositor_install_properties_helper (GObjectClass *
+    gobject_class);
 
 
 G_END_DECLS
