@@ -56,6 +56,8 @@ struct _GstV4l2Compositor
   GstCaps *probed_sinkcaps;
   GstCaps *probed_srccaps;
   GstCaps *srccaps;
+  GstCaps *sinkcaps;
+  gboolean already_negotiated;
 };
 
 struct _GstV4l2CompositorClass

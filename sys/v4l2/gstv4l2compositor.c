@@ -411,6 +411,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   sink_buf = NULL;
   source_buf = NULL;
   (*outbuf) = NULL;
+
   GST_OBJECT_LOCK (vagg);
 
   for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
@@ -506,10 +507,8 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   GstCaps *sinkcaps_prev;
   gboolean ok;
 
-  static gint count = 0;
-  if (count != 0)
+  if (self->already_negotiated)
     return TRUE;
-  count = 1;
 
   GST_DEBUG_OBJECT (self, "Use negotiated caps");
 
@@ -539,11 +538,17 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   }
   GST_OBJECT_UNLOCK (vagg);
 
-  ok = gst_v4l2_m2m_setup (self->m2m, self->srccaps, 8, sinkcaps, 8);
-  if (!ok)
+  gst_caps_replace (&self->sinkcaps, sinkcaps);
+
+  if (!gst_v4l2_m2m_setup (self->m2m, self->srccaps, 8, self->sinkcaps, 8))
     goto setup_failed;
 
+  self->already_negotiated = TRUE;
   goto done;
+
+setup_failed:
+  GST_ERROR_OBJECT (self, "could not setup m2m");
+  goto failed;
 
 srccaps_not_fixed:
   GST_ERROR_OBJECT (self, "source caps not fixed: %" GST_PTR_FORMAT,
@@ -560,10 +565,6 @@ sinkcaps_not_equal:
   GST_ERROR_OBJECT (self,
       "sink caps differs (pad#%d vs pad#%d):\n %" GST_PTR_FORMAT "\n %"
       GST_PTR_FORMAT, padn - 1, padn, sinkcaps_prev, sinkcaps);
-  goto failed;
-
-setup_failed:
-  GST_ERROR_OBJECT (self, "gst_v4l2_m2m_setup() failed");
   goto failed;
 
 failed:
@@ -605,14 +606,11 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
   if (gst_caps_is_empty (self->probed_srccaps))
     goto probed_srccaps_is_empty;
 
+  self->already_negotiated = FALSE;
   return TRUE;
 
 probed_sinkcaps_is_empty:
-  goto failure;
-
 probed_srccaps_is_empty:
-  goto failure;
-
 failure:
   gst_v4l2_compositor_close (self);
   return FALSE;
@@ -671,6 +669,7 @@ gst_v4l2_compositor_stop (GstV4l2Aggregator * agg)
 
   gst_v4l2_m2m_stop (self->m2m);
   gst_caps_replace (&self->srccaps, NULL);
+  gst_caps_replace (&self->sinkcaps, NULL);
 
   return TRUE;
 }
