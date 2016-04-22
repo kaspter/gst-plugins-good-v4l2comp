@@ -417,6 +417,12 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
     pad = l->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+
+    if (gst_v4l2_aggregator_pad_is_eos (GST_V4L2_AGGREGATOR_PAD (pad))) {
+      GST_DEBUG_OBJECT (self, "EOS called, do not process buffer");
+      goto not_ready;
+    }
+
     if (!pad->buffer)
       goto not_ready;
   }
@@ -458,6 +464,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
       goto failed;
     }
 
+    GST_DEBUG_OBJECT (self, "process output buffer");
     ok = gst_v4l2_m2m_process (self->m2m, source_buf, sink_buf);
     if (!ok) {
       GST_ERROR_OBJECT (self, "gst_v4l2_m2m_process() failed");
@@ -697,7 +704,6 @@ gst_v4l2_compositor_sink_event (GstV4l2Aggregator * agg,
       GST_DEBUG_OBJECT (self, "flush start");
       gst_v4l2_m2m_unlock (self->m2m);
       break;
-
     default:
       break;
   }
@@ -773,6 +779,7 @@ gst_v4l2_compositor_dispose (GObject * object)
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
+  GST_DEBUG_OBJECT (self, "called");
   gst_caps_replace (&self->probed_sinkcaps, NULL);
   gst_caps_replace (&self->probed_srccaps, NULL);
 
@@ -784,6 +791,7 @@ gst_v4l2_compositor_finalize (GObject * object)
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
+  GST_DEBUG_OBJECT (self, "called");
   gst_v4l2_m2m_destroy (self->m2m);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
