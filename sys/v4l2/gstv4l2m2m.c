@@ -71,6 +71,14 @@ gst_v4l2_m2m_destroy (GstV4l2M2m * m2m)
 {
   g_return_if_fail (m2m != NULL);
 
+  if (m2m->sink_allocator)
+    gst_object_unref (m2m->sink_allocator);
+  m2m->sink_allocator = NULL;
+
+  if (m2m->source_allocator)
+    gst_object_unref (m2m->source_allocator);
+  m2m->source_allocator = NULL;
+
   gst_v4l2_object_destroy (m2m->source_obj);
   gst_v4l2_object_destroy (m2m->sink_obj);
 
@@ -500,15 +508,12 @@ gst_v4l2_m2m_open (GstV4l2M2m * m2m)
 void
 gst_v4l2_m2m_close (GstV4l2M2m * m2m)
 {
-  gst_v4l2_object_close (m2m->sink_obj);
-  gst_v4l2_object_close (m2m->source_obj);
-
-  gst_v4l2_allocator_flush (m2m->sink_allocator);
-  gst_v4l2_allocator_flush (m2m->source_allocator);
-
   if (m2m->dmabuf_allocator)
     gst_object_unref (m2m->dmabuf_allocator);
   m2m->dmabuf_allocator = NULL;
+
+  gst_v4l2_object_close (m2m->sink_obj);
+  gst_v4l2_object_close (m2m->source_obj);
 }
 
 void
@@ -530,10 +535,17 @@ gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
 {
   gst_v4l2_object_stop (m2m->sink_obj);
   v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMOFF, &m2m->sink_obj->type);
+  if (m2m->sink_allocator) {
+    gst_v4l2_allocator_flush (m2m->sink_allocator);
+    gst_v4l2_allocator_stop (m2m->sink_allocator);
+  }
+
   gst_v4l2_object_stop (m2m->source_obj);
   v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMOFF,
       &m2m->source_obj->type);
+  if (m2m->source_allocator) {
+    gst_v4l2_allocator_flush (m2m->source_allocator);
+    gst_v4l2_allocator_stop (m2m->source_allocator);
+  }
 
-  gst_v4l2_allocator_stop (m2m->sink_allocator);
-  gst_v4l2_allocator_stop (m2m->source_allocator);
 }

@@ -353,9 +353,6 @@ gst_v4l2_video_enc_finish (GstVideoEncoder * encoder)
   if (gst_v4l2_encoder_cmd (self->v4l2output, V4L2_ENC_CMD_STOP, 0)) {
     /* If the encoder stop command succeeded, just wait until processing is
      * finished */
-    GST_OBJECT_LOCK (encoder->srcpad->task);
-    GST_TASK_WAIT (encoder->srcpad->task);
-    GST_OBJECT_UNLOCK (encoder->srcpad->task);
     ret = GST_FLOW_FLUSHING;
   } else {
     /* otherwise keep queuing empty buffers until the processing thread has
@@ -363,8 +360,8 @@ gst_v4l2_video_enc_finish (GstVideoEncoder * encoder)
     while (ret == GST_FLOW_OK) {
       buffer = gst_buffer_new ();
       ret =
-          gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (self->v4l2output->
-              pool), &buffer);
+          gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (self->
+              v4l2output->pool), &buffer);
       gst_buffer_unref (buffer);
     }
   }
