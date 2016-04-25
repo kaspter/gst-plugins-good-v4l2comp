@@ -48,6 +48,8 @@ struct _GstV4l2CompositorPad
 {
   GstV4l2VideoAggregatorPad parent;
 
+  GstV4l2M2m *m2m;
+
   /* properties */
   gint xpos, ypos;
   gint width, height;

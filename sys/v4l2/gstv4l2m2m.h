@@ -49,11 +49,11 @@ enum GstV4l2M2mBufferType
 {
   GST_V4L2_M2M_BUFTYPE_SINK,
   GST_V4L2_M2M_BUFTYPE_SOURCE,
+  GST_V4L2_M2M_BUFTYPE_ANY,
 };
 
 /* create/destroy */
-GstV4l2M2m *gst_v4l2_m2m_new (GstElement * element,
-    const char *default_device, GstV4l2UpdateFpsFunction update_fps_func);
+GstV4l2M2m *gst_v4l2_m2m_new (GstElement * parent);
 
 void gst_v4l2_m2m_destroy (GstV4l2M2m * m2m);
 
@@ -62,6 +62,10 @@ void gst_v4l2_m2m_destroy (GstV4l2M2m * m2m);
 void gst_v4l2_m2m_set_source_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode);
 void gst_v4l2_m2m_set_sink_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode);
 void gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char *videodev);
+
+GstV4l2IOMode gst_v4l2_m2m_get_sink_iomode(GstV4l2M2m * m2m);
+GstV4l2IOMode gst_v4l2_m2m_get_source_iomode(GstV4l2M2m * m2m);
+
 
 /* open/close */
 gboolean gst_v4l2_m2m_open (GstV4l2M2m * m2m);
@@ -84,14 +88,11 @@ GstVideoInfo *gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
 GstBuffer *gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type);
 
-void gst_v4l2_m2m_free_buffer (GstV4l2M2m * m2m,
-    enum GstV4l2M2mBufferType buf_type, GstBuffer * buf);
-
-gboolean gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * source_buf,
+gboolean gst_v4l2_m2m_process_frame (GstV4l2M2m * m2m, GstBuffer * source_buf,
     GstBuffer * sink_buf);
 
-gboolean gst_v4l2_m2m_copy_or_import_sink_buffer (GstV4l2M2m * m2m,
-    GstBuffer * buf, GstBuffer * external_buf);
+gboolean gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
+                                     GstBuffer * external_buf);
 
 gboolean gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m,
     struct v4l2_rect *source_rect, struct v4l2_rect *sink_rect);
