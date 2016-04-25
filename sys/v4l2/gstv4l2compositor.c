@@ -512,7 +512,6 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   int padn;
   GstCaps *sinkcaps;
   GstCaps *sinkcaps_prev;
-  gboolean ok;
 
   if (self->already_negotiated)
     return TRUE;
