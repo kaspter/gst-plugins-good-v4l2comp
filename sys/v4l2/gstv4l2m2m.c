@@ -506,14 +506,12 @@ gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char *videodev)
 }
 
 
-gboolean gst_v4l2_m2m_process_frame (GstV4l2M2m * m2m, GstBuffer * srcbuf, GstBuffer * sinkbuf)
+gboolean
+gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * srcbuf, GstBuffer * sinkbuf)
 {
   gboolean ok;
   GstV4l2Memory *srcmem;
   GstV4l2Memory *sinkmem;
-  GstFlowReturn flow;
-  GstV4l2MemoryGroup *srcgroup;
-  GstV4l2MemoryGroup *sinkgroup;
 
   srcmem = get_memory_object_from_buffer (m2m, srcbuf, GST_V4L2_M2M_BUFTYPE_SOURCE);
   if (!srcmem)
@@ -530,6 +528,16 @@ gboolean gst_v4l2_m2m_process_frame (GstV4l2M2m * m2m, GstBuffer * srcbuf, GstBu
   ok = gst_v4l2_allocator_qbuf (m2m->source_allocator, srcmem->group);
   if (!ok)
     return FALSE;
+
+  return TRUE;
+}
+
+gboolean
+gst_v4l2_m2m_wait (GstV4l2M2m * m2m)
+{
+  GstFlowReturn flow;
+  GstV4l2MemoryGroup *srcgroup;
+  GstV4l2MemoryGroup *sinkgroup;
 
   flow = gst_v4l2_allocator_dqbuf (m2m->sink_allocator, &sinkgroup);
   if (flow != GST_FLOW_OK)

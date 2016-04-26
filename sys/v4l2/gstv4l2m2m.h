@@ -88,8 +88,10 @@ GstVideoInfo *gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
 GstBuffer *gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type);
 
-gboolean gst_v4l2_m2m_process_frame (GstV4l2M2m * m2m, GstBuffer * source_buf,
+gboolean gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * source_buf,
     GstBuffer * sink_buf);
+
+gboolean gst_v4l2_m2m_wait (GstV4l2M2m * m2m);
 
 gboolean gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
                                      GstBuffer * external_buf);

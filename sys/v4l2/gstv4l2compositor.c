@@ -530,12 +530,29 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
 
     GST_DEBUG_OBJECT (self, "process output buffer");
 
-    ok = gst_v4l2_m2m_process_frame (cpad->m2m, source_buf, sink_buf);
-
+    ok = gst_v4l2_m2m_process (cpad->m2m, source_buf, sink_buf);
     if (!ok) {
       GST_ERROR_OBJECT (self, "gst_v4l2_m2m_process() failed");
       goto failed;
     }
+
+    cpad->source_buf = source_buf;
+    cpad->sink_buf = sink_buf;
+  }
+
+
+  for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
+    pad = l->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+
+    ok = gst_v4l2_m2m_wait (cpad->m2m);
+    if (!ok) {
+      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_wait() failed");
+      goto failed;
+    }
+
+    sink_buf = cpad->sink_buf;
+    source_buf = cpad->source_buf;
 
     gst_buffer_unref (sink_buf);
     sink_buf = NULL;
