@@ -438,8 +438,6 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   GstBuffer *returned_source_buf;
   GstBuffer *source_buf;
   gboolean ok;
-  struct v4l2_rect crop_bounds;
-  struct v4l2_rect compose_bounds;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
   GstV4l2CompositorPad *first_cpad;
@@ -518,16 +516,6 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
       }
     }
 
-    /* sebM: TODO: this part of the code about selection must be executed only once for
-     the first frame */
-    gst_v4l2_compositor_get_crop_bounds (self, cpad, &crop_bounds);
-    gst_v4l2_compositor_get_compose_bounds (self, cpad, &compose_bounds);
-    ok = gst_v4l2_m2m_set_selection (cpad->m2m, &crop_bounds, &compose_bounds);
-    if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_set_selection() failed");
-      goto failed;
-    }
-
     GST_DEBUG_OBJECT (self, "process output buffer");
 
     ok = gst_v4l2_m2m_process_frame (cpad->m2m, source_buf, sink_buf);
@@ -585,6 +573,9 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   GstCaps *sinkcaps;
   GstPad *pad;
   GstV4l2CompositorPad *cpad;
+  struct v4l2_rect crop_bounds;
+  struct v4l2_rect compose_bounds;
+  gboolean ok;
 
   if (self->already_negotiated)
     return TRUE;
@@ -614,6 +605,14 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
 
     if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, 2, sinkcaps, 2))
       goto setup_failed;
+
+    gst_v4l2_compositor_get_crop_bounds (self, cpad, &crop_bounds);
+    gst_v4l2_compositor_get_compose_bounds (self, cpad, &compose_bounds);
+    ok = gst_v4l2_m2m_set_selection (cpad->m2m, &crop_bounds, &compose_bounds);
+    if (!ok) {
+      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_set_selection() failed");
+      goto failed;
+    }
 
     padn++;
   }
