@@ -116,7 +116,7 @@ gst_v4l2_compositor_pad_set_property (GObject * object, guint prop_id,
       break;
     case PROP_PAD_DEVICE:
       if (pad->videodev != NULL)
-        g_free ((gpointer)pad->videodev);
+        g_free ((gpointer) pad->videodev);
       pad->videodev = g_value_dup_string (value);
       break;
     default:
@@ -318,8 +318,7 @@ gst_v4l2_compositor_set_property (GObject * object,
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
-  switch (prop_id)
-    {
+  switch (prop_id) {
     case PROP_DEVICE:
       g_free (self->videodev);
       self->videodev = g_value_dup_string (value);
@@ -333,7 +332,7 @@ gst_v4l2_compositor_set_property (GObject * object,
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
-    }
+  }
 }
 
 #define gst_v4l2_compositor_parent_class parent_class
@@ -407,8 +406,8 @@ gst_v4l2_compositor_get_first_pad (GstV4l2Compositor * self)
 
 
 static void
-gst_v4l2_compositor_get_compose_bounds (GstV4l2Compositor * self, GstV4l2CompositorPad * pad,
-    struct v4l2_rect *bounds)
+gst_v4l2_compositor_get_compose_bounds (GstV4l2Compositor * self,
+    GstV4l2CompositorPad * pad, struct v4l2_rect *bounds)
 {
   GstVideoInfo *info;
 
@@ -428,8 +427,8 @@ gst_v4l2_compositor_get_compose_bounds (GstV4l2Compositor * self, GstV4l2Composi
 }
 
 static void
-gst_v4l2_compositor_get_crop_bounds (GstV4l2Compositor * self, GstV4l2CompositorPad * pad,
-                                     struct v4l2_rect *bounds)
+gst_v4l2_compositor_get_crop_bounds (GstV4l2Compositor * self,
+    GstV4l2CompositorPad * pad, struct v4l2_rect *bounds)
 {
   GstVideoInfo *info;
 
@@ -478,7 +477,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   }
 
 
-  first_cpad = gst_v4l2_compositor_get_first_pad(self);
+  first_cpad = gst_v4l2_compositor_get_first_pad (self);
 
   returned_source_buf =
       gst_v4l2_m2m_alloc_buffer (first_cpad->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
@@ -501,11 +500,9 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
       goto failed;
     }
 
-    ok = gst_v4l2_m2m_import_buffer (cpad->m2m, sink_buf,
-                                     external_sink_buf);
+    ok = gst_v4l2_m2m_import_buffer (cpad->m2m, sink_buf, external_sink_buf);
     if (!ok) {
-      GST_ERROR_OBJECT (self,
-          "gst_v4l2_m2m_import_buffer() failed");
+      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_import_buffer() failed");
       goto failed;
     }
 
@@ -515,18 +512,18 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     }
 
     else {
-      source_buf = gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
+      source_buf =
+          gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
       if (!source_buf) {
         GST_ERROR_OBJECT (self,
-                          "gst_v4l2_m2m_alloc_buffer() for source_buf failed");
+            "gst_v4l2_m2m_alloc_buffer() for source_buf failed");
         goto failed;
       }
 
       ok = gst_v4l2_m2m_import_buffer (cpad->m2m, source_buf,
-                                       returned_source_buf);
+          returned_source_buf);
       if (!ok) {
-        GST_ERROR_OBJECT (self,
-                          "gst_v4l2_m2m_import_buffer() failed");
+        GST_ERROR_OBJECT (self, "gst_v4l2_m2m_import_buffer() failed");
         goto failed;
       }
     }
@@ -613,10 +610,11 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     if (!gst_caps_is_fixed (sinkcaps))
       goto sinkcaps_not_fixed;
 
-    printf("sinkpad #%d:\n", padn);
-    printf("------------\n");
-    printf("M2M iomodes: %d %d\n", gst_v4l2_m2m_get_sink_iomode(cpad->m2m), gst_v4l2_m2m_get_source_iomode(cpad->m2m));
-    printf("CAPS: %s\n\n", gst_caps_to_string(sinkcaps));
+    printf ("sinkpad #%d:\n", padn);
+    printf ("------------\n");
+    printf ("M2M iomodes: %d %d\n", gst_v4l2_m2m_get_sink_iomode (cpad->m2m),
+        gst_v4l2_m2m_get_source_iomode (cpad->m2m));
+    printf ("CAPS: %s\n\n", gst_caps_to_string (sinkcaps));
 
     if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, 2, sinkcaps, 2))
       goto setup_failed;
@@ -633,9 +631,9 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   }
   GST_OBJECT_UNLOCK (vagg);
 
-  printf("source CAPS:\n", padn);
-  printf("------------\n");
-  printf("%s\n\n", gst_caps_to_string(self->srccaps));
+  printf ("source CAPS:\n", padn);
+  printf ("------------\n");
+  printf ("%s\n\n", gst_caps_to_string (self->srccaps));
 
   self->already_negotiated = TRUE;
   goto done;
@@ -679,7 +677,7 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
 
   gst_v4l2_compositor_propagate_video_device (self);
 
-  first_cpad = gst_v4l2_compositor_get_first_pad(self);
+  first_cpad = gst_v4l2_compositor_get_first_pad (self);
 
   GST_OBJECT_LOCK (vagg);
 
@@ -691,8 +689,7 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
 
     if (cpad == first_cpad) {
       gst_v4l2_m2m_set_source_iomode (cpad->m2m, GST_V4L2_IO_DMABUF);
-    }
-    else {
+    } else {
       gst_v4l2_m2m_set_source_iomode (cpad->m2m, GST_V4L2_IO_DMABUF_IMPORT);
     }
 
@@ -894,8 +891,19 @@ static void
 gst_v4l2_compositor_dispose (GObject * object)
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
+  GstPad *pad;
+  GstV4l2CompositorPad *cpad;
+  GList *l;
 
   GST_DEBUG_OBJECT (self, "called");
+
+  for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
+    GST_DEBUG_OBJECT (self, "calling destroy");
+    pad = l->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+    gst_v4l2_m2m_destroy (cpad->m2m);
+  }
+
   gst_caps_replace (&self->srccaps, NULL);
 
   G_OBJECT_CLASS (parent_class)->dispose (object);
@@ -905,17 +913,8 @@ static void
 gst_v4l2_compositor_finalize (GObject * object)
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
-  GstPad *pad;
-  GstV4l2CompositorPad *cpad;
-  GList *l;
 
   GST_DEBUG_OBJECT (self, "called");
-
-  for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
-    pad = l->data;
-    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    gst_v4l2_m2m_destroy (cpad->m2m);
-  }
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
