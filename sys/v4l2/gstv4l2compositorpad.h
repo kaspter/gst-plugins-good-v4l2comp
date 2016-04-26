@@ -53,6 +53,7 @@ struct _GstV4l2CompositorPad
   /* properties */
   gint xpos, ypos;
   gint width, height;
+  gchar *videodev;
 
   GstBufferPool *peer_pool;
 

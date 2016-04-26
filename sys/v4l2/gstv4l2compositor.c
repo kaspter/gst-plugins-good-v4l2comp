@@ -53,13 +53,15 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink_%u",
 #define DEFAULT_PAD_YPOS   0
 #define DEFAULT_PAD_WIDTH  -1
 #define DEFAULT_PAD_HEIGHT -1
+#define DEFAULT_PAD_DEVICE NULL
 enum
 {
   PROP_PAD_0,
   PROP_PAD_XPOS,
   PROP_PAD_YPOS,
   PROP_PAD_WIDTH,
-  PROP_PAD_HEIGHT
+  PROP_PAD_HEIGHT,
+  PROP_PAD_DEVICE,
 };
 
 G_DEFINE_TYPE (GstV4l2CompositorPad, gst_v4l2_compositor_pad,
@@ -83,6 +85,9 @@ gst_v4l2_compositor_pad_get_property (GObject * object, guint prop_id,
       break;
     case PROP_PAD_HEIGHT:
       g_value_set_int (value, pad->height);
+      break;
+    case PROP_PAD_DEVICE:
+      g_value_set_string (value, pad->videodev);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -108,6 +113,11 @@ gst_v4l2_compositor_pad_set_property (GObject * object, guint prop_id,
       break;
     case PROP_PAD_HEIGHT:
       pad->height = g_value_get_int (value);
+      break;
+    case PROP_PAD_DEVICE:
+      if (pad->videodev != NULL)
+        g_free ((gpointer)pad->videodev);
+      pad->videodev = g_value_dup_string (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -235,7 +245,9 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
       g_param_spec_int ("height", "Height", "Height of the picture",
           G_MININT, G_MAXINT, DEFAULT_PAD_HEIGHT,
           G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS));
-
+  g_object_class_install_property (gobject_class, PROP_PAD_DEVICE,
+      g_param_spec_string ("device", "Device", "Device location",
+          NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   vaggpadclass->set_info = GST_DEBUG_FUNCPTR (gst_v4l2_compositor_pad_set_info);
   vaggpadclass->prepare_frame =
       GST_DEBUG_FUNCPTR (gst_v4l2_compositor_pad_prepare_frame);
@@ -283,7 +295,7 @@ gst_v4l2_compositor_get_property (GObject * object,
 
 
 static void
-gst_v4l2_compositor_propagate_video_device (GstV4l2Compositor * self, char *videodev)
+gst_v4l2_compositor_propagate_video_device (GstV4l2Compositor * self)
 {
   GList *l;
   GstV4l2VideoAggregatorPad *pad;
@@ -292,7 +304,10 @@ gst_v4l2_compositor_propagate_video_device (GstV4l2Compositor * self, char *vide
   for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
     pad = l->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    gst_v4l2_m2m_set_video_device (cpad->m2m, videodev);
+    if (cpad->videodev != NULL)
+      gst_v4l2_m2m_set_video_device (cpad->m2m, cpad->videodev);
+    else
+      gst_v4l2_m2m_set_video_device (cpad->m2m, self->videodev);
   }
 }
 
@@ -662,7 +677,7 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
 
   GST_DEBUG_OBJECT (self, "Opening");
 
-  gst_v4l2_compositor_propagate_video_device (self, self->videodev);
+  gst_v4l2_compositor_propagate_video_device (self);
 
   first_cpad = gst_v4l2_compositor_get_first_pad(self);
 

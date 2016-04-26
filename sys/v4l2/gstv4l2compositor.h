@@ -51,7 +51,7 @@ struct _GstV4l2Compositor
 
   GstV4l2IOMode output_io_mode;
   GstV4l2IOMode capture_io_mode;
-  char *videodev;
+  gchar *videodev;
   GstCaps *srccaps;
   gboolean already_negotiated;
 };
