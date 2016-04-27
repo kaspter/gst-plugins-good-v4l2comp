@@ -45,6 +45,18 @@ typedef struct _GstV4l2CompositorClass GstV4l2CompositorClass;
  *
  * The opaque #GstV4l2Compositor structure.
  */
+
+enum GstV4l2CompositorState
+{
+  GST_V4L2_COMPOSITOR_STATE_MAKEREADY,
+  GST_V4L2_COMPOSITOR_STATE_PROCESS,
+  GST_V4L2_COMPOSITOR_STATE_EOS,
+  GST_V4L2_COMPOSITOR_STATE_ERROR,
+};
+
+
+
+
 struct _GstV4l2Compositor
 {
   GstV4l2VideoAggregator videoaggregator;
@@ -54,6 +66,7 @@ struct _GstV4l2Compositor
   gchar *videodev;
   GstCaps *srccaps;
   gboolean already_negotiated;
+  enum GstV4l2CompositorState state;
 };
 
 struct _GstV4l2CompositorClass
