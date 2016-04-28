@@ -97,10 +97,7 @@ get_io_mode (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
   else
     mode = m2m->sink_iomode;
 
-  if (mode == GST_V4L2_IO_AUTO)
-    return GST_V4L2_IO_MMAP;
-  else
-    return mode;
+  return mode;
 }
 
 
@@ -118,7 +115,9 @@ get_v4l2_memory (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type,
     case GST_V4L2_IO_AUTO:
     case GST_V4L2_IO_RW:
     case GST_V4L2_IO_USERPTR:
+    case GST_V4L2_IO_MMAP:
     default:
+      GST_DEBUG_OBJECT (m2m->parent, "Unsupported iomode type %d", mode);
       return FALSE;
 
     case GST_V4L2_IO_DMABUF:
@@ -129,10 +128,6 @@ get_v4l2_memory (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type,
 
     case GST_V4L2_IO_DMABUF_IMPORT:
       (*memory) = V4L2_MEMORY_DMABUF;
-      return TRUE;
-
-    case GST_V4L2_IO_MMAP:
-      (*memory) = V4L2_MEMORY_MMAP;
       return TRUE;
   }
 }
@@ -422,9 +417,6 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
   mode = get_io_mode (m2m, buf_type);
 
   switch (mode) {
-    case GST_V4L2_IO_MMAP:
-      group = gst_v4l2_allocator_alloc_mmap (allocator);
-      break;
     case GST_V4L2_IO_DMABUF_IMPORT:
       group = gst_v4l2_allocator_alloc_dmabufin (allocator);
       break;

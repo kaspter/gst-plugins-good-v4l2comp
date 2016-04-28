@@ -261,13 +261,10 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
 /* GstV4l2Compositor */
 
 #define DEFAULT_PROP_DEVICE   "/dev/video0"
-#define DEFAULT_PROP_IO_MODE  GST_V4L2_IO_AUTO
 enum
 {
   PROP_0,
   PROP_DEVICE,
-  PROP_OUTPUT_IO_MODE,
-  PROP_CAPTURE_IO_MODE
 };
 
 
@@ -280,12 +277,6 @@ gst_v4l2_compositor_get_property (GObject * object,
   switch (prop_id) {
     case PROP_DEVICE:
       g_value_set_string (value, self->videodev);
-      break;
-    case PROP_OUTPUT_IO_MODE:
-      g_value_set_enum (value, self->output_io_mode);
-      break;
-    case PROP_CAPTURE_IO_MODE:
-      g_value_set_enum (value, self->capture_io_mode);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -324,12 +315,6 @@ gst_v4l2_compositor_set_property (GObject * object,
     case PROP_DEVICE:
       g_free (self->videodev);
       self->videodev = g_value_dup_string (value);
-      break;
-    case PROP_OUTPUT_IO_MODE:
-      self->output_io_mode = g_value_get_enum (value);
-      break;
-    case PROP_CAPTURE_IO_MODE:
-      self->capture_io_mode = g_value_get_enum (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1033,8 +1018,6 @@ gst_v4l2_compositor_finalize (GObject * object)
 static void
 gst_v4l2_compositor_init (GstV4l2Compositor * self)
 {
-  self->output_io_mode = DEFAULT_PROP_IO_MODE;
-  self->capture_io_mode = DEFAULT_PROP_IO_MODE;
   self->videodev = g_strdup (DEFAULT_PROP_DEVICE);
   self->state = GST_V4L2_COMPOSITOR_STATE_MAKEREADY;
 }
@@ -1099,16 +1082,4 @@ gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class)
   g_object_class_install_property (gobject_class, PROP_DEVICE,
       g_param_spec_string ("device", "Device", "Device location",
           NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-  g_object_class_install_property (gobject_class, PROP_OUTPUT_IO_MODE,
-      g_param_spec_enum ("output-io-mode", "Output IO mode",
-          "Output side I/O mode (matches sink pad)",
-          GST_TYPE_V4L2_IO_MODE, DEFAULT_PROP_IO_MODE,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-  g_object_class_install_property (gobject_class, PROP_CAPTURE_IO_MODE,
-      g_param_spec_enum ("capture-io-mode", "Capture IO mode",
-          "Capture I/O mode (matches src pad)",
-          GST_TYPE_V4L2_IO_MODE, DEFAULT_PROP_IO_MODE,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }

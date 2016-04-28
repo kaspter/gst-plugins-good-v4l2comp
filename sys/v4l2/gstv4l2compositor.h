@@ -60,9 +60,6 @@ enum GstV4l2CompositorState
 struct _GstV4l2Compositor
 {
   GstV4l2VideoAggregator videoaggregator;
-
-  GstV4l2IOMode output_io_mode;
-  GstV4l2IOMode capture_io_mode;
   gchar *videodev;
   GstCaps *srccaps;
   gboolean already_negotiated;
