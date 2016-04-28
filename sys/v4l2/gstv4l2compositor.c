@@ -439,12 +439,12 @@ gst_v4l2_compositor_cleanup_buffers (GstV4l2Compositor * self)
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
     if (cpad->source_buf != NULL) {
-      gst_buffer_unref(cpad->source_buf);
+      gst_buffer_unref (cpad->source_buf);
       cpad->source_buf = NULL;
     }
 
     if (cpad->sink_buf != NULL) {
-      gst_buffer_unref(cpad->sink_buf);
+      gst_buffer_unref (cpad->sink_buf);
       cpad->sink_buf = NULL;
     }
   }
@@ -464,8 +464,8 @@ gst_v4l2_compositor_do_makeready (GstV4l2Compositor * self, GstBuffer ** outbuf)
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
   GstV4l2CompositorPad *first_cpad;
-  GstBuffer * returned_source_buf;
-  GstBuffer * source_buf;
+  GstBuffer *returned_source_buf;
+  GstBuffer *source_buf;
   gboolean ok;
 
   (*outbuf) = NULL;
@@ -475,10 +475,10 @@ gst_v4l2_compositor_do_makeready (GstV4l2Compositor * self, GstBuffer ** outbuf)
   /* alloc returned_source_buf */
   first_cpad = gst_v4l2_compositor_get_first_pad (self);
   returned_source_buf =
-    gst_v4l2_m2m_alloc_buffer (first_cpad->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
+      gst_v4l2_m2m_alloc_buffer (first_cpad->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
   if (!returned_source_buf) {
     GST_ERROR_OBJECT (self,
-                      "gst_v4l2_m2m_alloc_buffer() for returned_source_buf failed");
+        "gst_v4l2_m2m_alloc_buffer() for returned_source_buf failed");
     goto failed;
   }
   first_cpad->source_buf = returned_source_buf;
@@ -492,15 +492,15 @@ gst_v4l2_compositor_do_makeready (GstV4l2Compositor * self, GstBuffer ** outbuf)
       continue;
 
     source_buf =
-      gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
+        gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
     if (!source_buf) {
       GST_ERROR_OBJECT (self,
-                        "gst_v4l2_m2m_alloc_buffer() for source_buf failed");
+          "gst_v4l2_m2m_alloc_buffer() for source_buf failed");
       goto failed;
     }
 
     ok = gst_v4l2_m2m_import_buffer (cpad->m2m, source_buf,
-                                     returned_source_buf);
+        returned_source_buf);
     if (!ok) {
       GST_ERROR_OBJECT (self, "gst_v4l2_m2m_import_buffer() failed");
       goto failed;
@@ -537,13 +537,13 @@ gst_v4l2_compositor_do_process (GstV4l2Compositor * self, GstBuffer ** outbuf)
   for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
     pad = l->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    count ++;
+    count++;
 
     external_sink_buf = pad->buffer;
     if (external_sink_buf == NULL)
       continue;
 
-    count_external ++;
+    count_external++;
 
     if (cpad->sink_buf != NULL)
       continue;
@@ -552,7 +552,7 @@ gst_v4l2_compositor_do_process (GstV4l2Compositor * self, GstBuffer ** outbuf)
     sink_buf = gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
     if (!sink_buf) {
       GST_ERROR_OBJECT (self,
-                        "gst_v4l2_m2m_alloc_buffer() for sink_buf failed");
+          "gst_v4l2_m2m_alloc_buffer() for sink_buf failed");
       return FALSE;
     }
     cpad->sink_buf = sink_buf;
@@ -570,14 +570,6 @@ gst_v4l2_compositor_do_process (GstV4l2Compositor * self, GstBuffer ** outbuf)
       GST_ERROR_OBJECT (self, "gst_v4l2_m2m_process() failed");
       goto failed;
     }
-  }
-
-  if (!((count_external > 0) && (count_external == count)))
-    return TRUE;
-
-  for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
-    pad = l->data;
-    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
     ok = gst_v4l2_m2m_wait (cpad->m2m);
     if (!ok) {
@@ -626,8 +618,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     }
   }
 
-  switch(self->state)
-    {
+  switch (self->state) {
     case GST_V4L2_COMPOSITOR_STATE_MAKEREADY:
       ok = gst_v4l2_compositor_do_makeready (self, outbuf);
       break;
@@ -638,9 +629,9 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
       self->state = GST_V4L2_COMPOSITOR_STATE_ERROR;
       GST_ERROR_OBJECT (self, "Unexpected state value, should not happen");
       break;
-    }
+  }
 
-  if (! ok) {
+  if (!ok) {
     gst_v4l2_compositor_cleanup_buffers (self);
     self->state = GST_V4L2_COMPOSITOR_STATE_ERROR;
     goto error;
