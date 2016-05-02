@@ -25,7 +25,6 @@
 #include <gst/video/video.h>
 
 G_BEGIN_DECLS
-
 #define GST_TYPE_V4L2_COMPOSITOR_PAD (gst_v4l2_compositor_pad_get_type())
 #define GST_V4L2_COMPOSITOR_PAD(obj) \
         (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_V4L2_COMPOSITOR_PAD, GstV4l2CompositorPad))
@@ -35,7 +34,6 @@ G_BEGIN_DECLS
         (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_V4L2_COMPOSITOR_PAD))
 #define GST_IS_V4L2_COMPOSITOR_PAD_CLASS(klass) \
         (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_V4L2_COMPOSITOR_PAD))
-
 typedef struct _GstV4l2CompositorPad GstV4l2CompositorPad;
 typedef struct _GstV4l2CompositorPadClass GstV4l2CompositorPadClass;
 
@@ -49,8 +47,8 @@ struct _GstV4l2CompositorPad
   GstV4l2VideoAggregatorPad parent;
 
   GstV4l2M2m *m2m;
-  GstBuffer * source_buf;
-  GstBuffer * sink_buf;
+  GstBuffer *source_buf;
+  GstBuffer *sink_buf;
 
   /* properties */
   gint xpos, ypos;

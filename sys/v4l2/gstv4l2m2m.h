@@ -63,8 +63,8 @@ void gst_v4l2_m2m_set_source_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode);
 void gst_v4l2_m2m_set_sink_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode);
 void gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char *videodev);
 
-GstV4l2IOMode gst_v4l2_m2m_get_sink_iomode(GstV4l2M2m * m2m);
-GstV4l2IOMode gst_v4l2_m2m_get_source_iomode(GstV4l2M2m * m2m);
+GstV4l2IOMode gst_v4l2_m2m_get_sink_iomode (GstV4l2M2m * m2m);
+GstV4l2IOMode gst_v4l2_m2m_get_source_iomode (GstV4l2M2m * m2m);
 
 
 /* open/close */
@@ -79,7 +79,8 @@ void gst_v4l2_m2m_stop (GstV4l2M2m * m2m);
 
 /* specific operations */
 
-gboolean gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * src_caps, GstCaps * sink_caps);
+gboolean gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * src_caps,
+    GstCaps * sink_caps);
 
 GstVideoInfo *gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type);
@@ -93,7 +94,7 @@ gboolean gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * source_buf,
 gboolean gst_v4l2_m2m_wait (GstV4l2M2m * m2m);
 
 gboolean gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
-                                     GstBuffer * external_buf);
+    GstBuffer * external_buf);
 
 gboolean gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m,
     struct v4l2_rect *source_rect, struct v4l2_rect *sink_rect);
