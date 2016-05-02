@@ -703,7 +703,7 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
         gst_v4l2_m2m_get_source_iomode (cpad->m2m));
     printf ("CAPS: %s\n\n", gst_caps_to_string (sinkcaps));
 
-    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, 2, sinkcaps, 2))
+    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, sinkcaps))
       goto setup_failed;
 
     gst_v4l2_compositor_get_crop_bounds (self, cpad, &crop_bounds);

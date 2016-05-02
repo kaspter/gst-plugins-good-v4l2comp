@@ -79,8 +79,7 @@ void gst_v4l2_m2m_stop (GstV4l2M2m * m2m);
 
 /* specific operations */
 
-gboolean gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * src_caps,
-    int src_nbufs, GstCaps * sink_caps, int sink_nbufs);
+gboolean gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * src_caps, GstCaps * sink_caps);
 
 GstVideoInfo *gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type);
