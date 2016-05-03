@@ -125,56 +125,6 @@ gst_v4l2_compositor_pad_set_property (GObject * object, guint prop_id,
   }
 }
 
-static void
-_mixer_pad_get_output_size (GstV4l2Compositor * comp,
-    GstV4l2CompositorPad * comp_pad, gint * width, gint * height)
-{
-  GstV4l2VideoAggregator *vagg = GST_V4L2_VIDEO_AGGREGATOR (comp);
-  GstV4l2VideoAggregatorPad *vagg_pad =
-      GST_V4L2_VIDEO_AGGREGATOR_PAD (comp_pad);
-  gint pad_width, pad_height;
-  guint dar_n, dar_d;
-
-  /* FIXME: Anything better we can do here? */
-  if (!vagg_pad->info.finfo
-      || vagg_pad->info.finfo->format == GST_VIDEO_FORMAT_UNKNOWN) {
-    GST_DEBUG_OBJECT (comp_pad, "Have no caps yet");
-    *width = 0;
-    *height = 0;
-    return;
-  }
-
-  pad_width =
-      comp_pad->width <=
-      0 ? GST_VIDEO_INFO_WIDTH (&vagg_pad->info) : comp_pad->width;
-  pad_height =
-      comp_pad->height <=
-      0 ? GST_VIDEO_INFO_HEIGHT (&vagg_pad->info) : comp_pad->height;
-
-  gst_video_calculate_display_ratio (&dar_n, &dar_d, pad_width, pad_height,
-      GST_VIDEO_INFO_PAR_N (&vagg_pad->info),
-      GST_VIDEO_INFO_PAR_D (&vagg_pad->info),
-      GST_VIDEO_INFO_PAR_N (&vagg->info), GST_VIDEO_INFO_PAR_D (&vagg->info)
-      );
-  GST_LOG_OBJECT (comp_pad, "scaling %ux%u by %u/%u (%u/%u / %u/%u)", pad_width,
-      pad_height, dar_n, dar_d, GST_VIDEO_INFO_PAR_N (&vagg_pad->info),
-      GST_VIDEO_INFO_PAR_D (&vagg_pad->info),
-      GST_VIDEO_INFO_PAR_N (&vagg->info), GST_VIDEO_INFO_PAR_D (&vagg->info));
-
-  if (pad_height % dar_n == 0) {
-    pad_width = gst_util_uint64_scale_int (pad_height, dar_n, dar_d);
-  } else if (pad_width % dar_d == 0) {
-    pad_height = gst_util_uint64_scale_int (pad_width, dar_d, dar_n);
-  } else {
-    pad_width = gst_util_uint64_scale_int (pad_height, dar_n, dar_d);
-  }
-
-  if (width)
-    *width = pad_width;
-  if (height)
-    *height = pad_height;
-}
-
 static gboolean
 gst_v4l2_compositor_pad_set_info (GstV4l2VideoAggregatorPad * pad,
     GstV4l2VideoAggregator * vagg G_GNUC_UNUSED,
@@ -325,54 +275,6 @@ gst_v4l2_compositor_set_property (GObject * object,
 #define gst_v4l2_compositor_parent_class parent_class
 G_DEFINE_TYPE (GstV4l2Compositor, gst_v4l2_compositor,
     GST_TYPE_V4L2_VIDEO_AGGREGATOR);
-
-static GstCaps *
-gst_v4l2_compositor_update_caps (GstV4l2VideoAggregator * vagg, GstCaps * caps)
-{
-  GList *l;
-  gint best_width = -1, best_height = -1;
-  GstVideoInfo info;
-  GstCaps *ret = NULL;
-
-  gst_video_info_from_caps (&info, caps);
-
-  /* FIXME: this doesn't work for non 1/1 output par's as we don't have that
-   * information available at this time */
-
-  GST_OBJECT_LOCK (vagg);
-  for (l = GST_ELEMENT (vagg)->sinkpads; l; l = l->next) {
-    GstV4l2VideoAggregatorPad *vaggpad = l->data;
-    GstV4l2CompositorPad *compositor_pad = GST_V4L2_COMPOSITOR_PAD (vaggpad);
-    gint this_width, this_height;
-    gint width, height;
-
-    _mixer_pad_get_output_size (GST_V4L2_COMPOSITOR (vagg), compositor_pad,
-        &width, &height);
-
-    if (width == 0 || height == 0)
-      continue;
-
-    this_width = width + MAX (compositor_pad->xpos, 0);
-    this_height = height + MAX (compositor_pad->ypos, 0);
-
-    if (best_width < this_width)
-      best_width = this_width;
-    if (best_height < this_height)
-      best_height = this_height;
-  }
-  GST_OBJECT_UNLOCK (vagg);
-
-  if (best_width > 0 && best_height > 0) {
-    info.width = best_width;
-    info.height = best_height;
-
-    ret = gst_video_info_to_caps (&info);
-    gst_caps_set_simple (ret, "pixel-aspect-ratio", GST_TYPE_FRACTION_RANGE,
-        1, G_MAXINT, G_MAXINT, 1, NULL);
-  }
-
-  return ret;
-}
 
 
 static GstV4l2CompositorPad *
@@ -1049,8 +951,6 @@ gst_v4l2_compositor_class_init (GstV4l2CompositorClass * klass)
       GST_DEBUG_FUNCPTR (gst_v4l2_compositor_create_new_pad);
   videoaggregator_class->negotiated_caps =
       GST_DEBUG_FUNCPTR (gst_v4l2_compositor_negotiated_caps);
-  videoaggregator_class->update_caps =
-      GST_DEBUG_FUNCPTR (gst_v4l2_compositor_update_caps);
   videoaggregator_class->get_output_buffer =
       GST_DEBUG_FUNCPTR (gst_v4l2_compositor_get_output_buffer);
   videoaggregator_class->aggregate_frames =
