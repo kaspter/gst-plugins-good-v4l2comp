@@ -217,7 +217,7 @@ gst_v4l2_compositor_pad_init (GstV4l2CompositorPad * cpad)
   cpad->height = DEFAULT_PAD_HEIGHT;
   cpad->source_buf = NULL;
   cpad->sink_buf = NULL;
-  cpad->m2m = gst_v4l2_m2m_new (GST_ELEMENT (cpad));
+  cpad->m2m = NULL;
 }
 
 static void
@@ -687,7 +687,6 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     goto srccaps_not_fixed;
 
   /** Set format **/
-  GST_OBJECT_LOCK (vagg);
   padn = 0;
   for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
     pad = l->data;
@@ -716,7 +715,6 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
 
     padn++;
   }
-  GST_OBJECT_UNLOCK (vagg);
 
   printf ("source CAPS:\n", padn);
   printf ("------------\n");
@@ -762,11 +760,18 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
 
   GST_DEBUG_OBJECT (self, "Opening");
 
+  GST_OBJECT_LOCK (vagg);
+
+  for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
+    pad = l->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+    cpad->m2m = gst_v4l2_m2m_new (GST_ELEMENT (self));
+  }
+
   gst_v4l2_compositor_propagate_video_device (self);
 
   first_cpad = gst_v4l2_compositor_get_first_pad (self);
 
-  GST_OBJECT_LOCK (vagg);
 
   for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
     pad = l->data;
@@ -784,12 +789,14 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
       goto failure;
 
   }
-  GST_OBJECT_UNLOCK (vagg);
 
   self->already_negotiated = FALSE;
+
+  GST_OBJECT_UNLOCK (vagg);
   return TRUE;
 
 failure:
+  GST_OBJECT_UNLOCK (vagg);
   gst_v4l2_compositor_close (self);
   return FALSE;
 }
