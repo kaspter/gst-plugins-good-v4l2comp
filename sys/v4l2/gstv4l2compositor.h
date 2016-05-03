@@ -26,7 +26,6 @@
 #include "gstv4l2m2m.h"
 #include "gstv4l2videoaggregator.h"
 
-
 G_BEGIN_DECLS
 #define GST_TYPE_V4L2_COMPOSITOR (gst_v4l2_compositor_get_type())
 #define GST_V4L2_COMPOSITOR(obj) \
@@ -54,9 +53,6 @@ enum GstV4l2CompositorState
   GST_V4L2_COMPOSITOR_STATE_ERROR,
 };
 
-
-
-
 struct _GstV4l2Compositor
 {
   GstV4l2VideoAggregator videoaggregator;
@@ -75,7 +71,6 @@ GType gst_v4l2_compositor_get_type (void);
 
 void gst_v4l2_compositor_install_properties_helper (GObjectClass *
     gobject_class);
-
 
 G_END_DECLS
 #endif /* __GST_V4L2_COMPOSITOR_H__ */

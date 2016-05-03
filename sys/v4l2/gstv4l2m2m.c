@@ -86,7 +86,6 @@ gst_v4l2_m2m_destroy (GstV4l2M2m * m2m)
   g_free (m2m);
 }
 
-
 static GstV4l2IOMode
 get_io_mode (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
 {
@@ -99,9 +98,6 @@ get_io_mode (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
 
   return mode;
 }
-
-
-
 
 static gboolean
 get_v4l2_memory (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type,
@@ -199,8 +195,6 @@ not_our_buffer:
   return NULL;
 }
 
-
-
 static GstV4l2Allocator *
 get_allocator_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
     GstV4l2IOMode * io_mode)
@@ -222,9 +216,6 @@ get_allocator_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
   return allocator;
 }
 
-
-
-
 static GstV4l2Allocator *
 get_allocator_from_buftype (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type)
@@ -238,14 +229,6 @@ get_allocator_from_buftype (GstV4l2M2m * m2m,
       return NULL;
   }
 }
-
-
-
-
-
-
-
-
 
 GstV4l2IOMode
 gst_v4l2_m2m_get_sink_iomode (GstV4l2M2m * m2m)
@@ -262,8 +245,6 @@ gst_v4l2_m2m_get_source_iomode (GstV4l2M2m * m2m)
   mode = get_io_mode (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
   return mode;
 }
-
-
 
 gboolean
 gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
@@ -336,7 +317,6 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
   return TRUE;
 }
 
-
 GstVideoInfo *
 gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type)
@@ -346,12 +326,6 @@ gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
   else
     return &m2m->sink_obj->info;
 }
-
-
-
-
-
-
 
 static void
 on_buffer_finalization (gpointer m2m_p, GstMiniObject * buf_p)
@@ -374,10 +348,6 @@ on_buffer_finalization (gpointer m2m_p, GstMiniObject * buf_p)
   group = ((GstV4l2Memory *) mem)->group;
   gst_v4l2_allocator_reset_group (allocator, group);
 }
-
-
-
-
 
 gboolean
 gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * crop_bounds,
@@ -406,12 +376,6 @@ gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * crop_bounds,
 
   return TRUE;
 }
-
-
-
-
-
-
 
 GstBuffer *
 gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
@@ -450,19 +414,11 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
   mem = group->mem[0];
   gst_buffer_append_memory (buf, mem);
 
-
-
   gst_mini_object_weak_ref ((GstMiniObject *) buf, on_buffer_finalization,
       (gpointer) m2m);
 
   return buf;
 }
-
-
-
-
-
-
 
 gboolean
 gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
@@ -515,7 +471,6 @@ gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char *videodev)
   m2m->sink_obj->videodev = g_strdup (videodev);
 }
 
-
 gboolean
 gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * srcbuf, GstBuffer * sinkbuf)
 {
@@ -567,9 +522,6 @@ gst_v4l2_m2m_wait (GstV4l2M2m * m2m)
 
   return TRUE;
 }
-
-
-
 
 gboolean
 gst_v4l2_m2m_open (GstV4l2M2m * m2m)

@@ -46,9 +46,6 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink_%u",
     GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE (FORMATS))
     );
 
-
-
-
 #define DEFAULT_PAD_XPOS   0
 #define DEFAULT_PAD_YPOS   0
 #define DEFAULT_PAD_WIDTH  -1
@@ -207,16 +204,13 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
       GST_DEBUG_FUNCPTR (gst_v4l2_compositor_pad_clean_frame);
 }
 
-
 /* GstV4l2Compositor */
-
 #define DEFAULT_PROP_DEVICE   "/dev/video0"
 enum
 {
   PROP_0,
   PROP_DEVICE,
 };
-
 
 static void
 gst_v4l2_compositor_get_property (GObject * object,
@@ -234,9 +228,6 @@ gst_v4l2_compositor_get_property (GObject * object,
   }
 }
 
-
-
-
 static void
 gst_v4l2_compositor_propagate_video_device (GstV4l2Compositor * self)
 {
@@ -253,7 +244,6 @@ gst_v4l2_compositor_propagate_video_device (GstV4l2Compositor * self)
       gst_v4l2_m2m_set_video_device (cpad->m2m, self->videodev);
   }
 }
-
 
 static void
 gst_v4l2_compositor_set_property (GObject * object,
@@ -276,7 +266,6 @@ gst_v4l2_compositor_set_property (GObject * object,
 G_DEFINE_TYPE (GstV4l2Compositor, gst_v4l2_compositor,
     GST_TYPE_V4L2_VIDEO_AGGREGATOR);
 
-
 static GstV4l2CompositorPad *
 gst_v4l2_compositor_get_first_pad (GstV4l2Compositor * self)
 {
@@ -291,8 +280,6 @@ gst_v4l2_compositor_get_first_pad (GstV4l2Compositor * self)
   }
   return NULL;
 }
-
-
 
 static void
 gst_v4l2_compositor_get_compose_bounds (GstV4l2Compositor * self,
@@ -328,7 +315,6 @@ gst_v4l2_compositor_get_crop_bounds (GstV4l2Compositor * self,
   bounds->height = info->height;
 }
 
-
 static void
 gst_v4l2_compositor_cleanup_buffers (GstV4l2Compositor * self)
 {
@@ -351,13 +337,6 @@ gst_v4l2_compositor_cleanup_buffers (GstV4l2Compositor * self)
     }
   }
 }
-
-
-
-
-
-
-
 
 static gboolean
 gst_v4l2_compositor_do_makeready (GstV4l2Compositor * self, GstBuffer ** outbuf)
@@ -416,8 +395,6 @@ gst_v4l2_compositor_do_makeready (GstV4l2Compositor * self, GstBuffer ** outbuf)
 failed:
   return FALSE;
 }
-
-
 
 static gboolean
 gst_v4l2_compositor_do_process (GstV4l2Compositor * self, GstBuffer ** outbuf)
@@ -489,8 +466,6 @@ gst_v4l2_compositor_do_process (GstV4l2Compositor * self, GstBuffer ** outbuf)
 failed:
   return FALSE;
 }
-
-
 
 static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
@@ -721,7 +696,6 @@ gst_v4l2_compositor_unlock (GstV4l2Compositor * self)
   GST_OBJECT_UNLOCK (self);
 }
 
-
 static void
 gst_v4l2_compositor_unlock_stop (GstV4l2Compositor * self)
 {
@@ -739,9 +713,6 @@ gst_v4l2_compositor_unlock_stop (GstV4l2Compositor * self)
   }
   GST_OBJECT_UNLOCK (self);
 }
-
-
-
 
 static void
 gst_v4l2_compositor_close (GstV4l2Compositor * self)
@@ -785,10 +756,6 @@ gst_v4l2_compositor_stop (GstV4l2Aggregator * agg)
 
   return TRUE;
 }
-
-
-
-
 
 static gboolean
 gst_v4l2_compositor_sink_query (GstV4l2Aggregator * agg,
@@ -971,8 +938,6 @@ gst_v4l2_compositor_class_init (GstV4l2CompositorClass * klass)
 
   gst_v4l2_compositor_install_properties_helper (gobject_class);
 }
-
-
 
 void
 gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class)
