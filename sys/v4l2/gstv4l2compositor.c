@@ -498,7 +498,8 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   switch (self->state) {
     case GST_V4L2_COMPOSITOR_STATE_MAKEREADY:
       ok = gst_v4l2_compositor_do_makeready (self, outbuf);
-      break;
+      if (self->state != GST_V4L2_COMPOSITOR_STATE_PROCESS)
+        break;
     case GST_V4L2_COMPOSITOR_STATE_PROCESS:
       ok = gst_v4l2_compositor_do_process (self, outbuf);
       break;
