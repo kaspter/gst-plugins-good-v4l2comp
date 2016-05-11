@@ -566,6 +566,7 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
 
   /** Set format **/
   padn = 0;
+
   for (l = GST_ELEMENT (self)->sinkpads; l; l = l->next) {
     pad = l->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
@@ -665,6 +666,9 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
 
     if (!gst_v4l2_m2m_open (cpad->m2m))
       goto failure;
+
+    if (!gst_v4l2_m2m_set_background (first_cpad->m2m, 0))
+      GST_DEBUG_OBJECT (self, "could not set background color");
 
   }
 

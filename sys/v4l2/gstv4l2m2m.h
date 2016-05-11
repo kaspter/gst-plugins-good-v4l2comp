@@ -95,4 +95,5 @@ gboolean gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
 gboolean gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m,
     struct v4l2_rect *source_rect, struct v4l2_rect *sink_rect);
 
+gboolean gst_v4l2_m2m_set_background (GstV4l2M2m * m2m, unsigned int background);
 #endif /* __GST_V4L2_M2M_H__ */

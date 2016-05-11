@@ -350,6 +350,19 @@ on_buffer_finalization (gpointer m2m_p, GstMiniObject * buf_p)
 }
 
 gboolean
+gst_v4l2_m2m_set_background (GstV4l2M2m * m2m, unsigned int background)
+{
+  struct v4l2_control control = { 0, };
+
+  control.id = V4L2_CID_BG_COLOR;
+  control.value = background;
+  if (v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_S_CTRL, &control) < 0)
+    return FALSE;
+
+  return TRUE;
+}
+
+gboolean
 gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * crop_bounds,
     struct v4l2_rect * compose_bounds)
 {
