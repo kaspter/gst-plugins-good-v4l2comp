@@ -49,6 +49,9 @@ struct _GstV4l2CompositorPad
   GstV4l2M2m *m2m;
   GstBuffer *source_buf;
   GstBuffer *sink_buf;
+  gboolean source_queued;
+  gboolean sink_queued;
+  gboolean dequeued;
 
   /* properties */
   gint xpos, ypos;
@@ -60,6 +63,8 @@ struct _GstV4l2CompositorPad
   GstVideoConverter *convert;
   GstVideoInfo conversion_info;
   GstBuffer *converted_buffer;
+
+  int num;
 };
 
 struct _GstV4l2CompositorPadClass

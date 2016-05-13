@@ -43,6 +43,7 @@ struct _GstV4l2M2m
   GstAllocator *dmabuf_allocator;
   GstV4l2IOMode source_iomode;
   GstV4l2IOMode sink_iomode;
+  gboolean streaming;
 };
 
 enum GstV4l2M2mBufferType
@@ -84,10 +85,13 @@ GstVideoInfo *gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
 GstBuffer *gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type);
 
-gboolean gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * source_buf,
-    GstBuffer * sink_buf);
+gboolean gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf);
 
-gboolean gst_v4l2_m2m_wait (GstV4l2M2m * m2m);
+gboolean gst_v4l2_m2m_dqbuf (GstV4l2M2m * m2m, GstBuffer * buf);
+
+gboolean gst_v4l2_m2m_require_streamon (GstV4l2M2m * m2m);
+
+gboolean gst_v4l2_m2m_reset_buffer (GstV4l2M2m * m2m, GstBuffer * buf);
 
 gboolean gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
     GstBuffer * external_buf);

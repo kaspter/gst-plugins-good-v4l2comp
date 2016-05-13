@@ -64,6 +64,8 @@ gst_v4l2_m2m_new (GstElement * parent)
   m2m->source_obj->no_initial_format = TRUE;
   m2m->source_obj->keep_aspect = FALSE;
 
+  m2m->streaming = FALSE;
+
   return m2m;
 }
 
@@ -197,7 +199,7 @@ not_our_buffer:
 
 static GstV4l2Allocator *
 get_allocator_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
-    GstV4l2IOMode * io_mode)
+    enum GstV4l2M2mBufferType *buf_type, GstV4l2IOMode * io_mode)
 {
   GstV4l2Memory *our_mem;
   GstV4l2Allocator *allocator;
@@ -208,10 +210,20 @@ get_allocator_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
     return NULL;
 
   allocator = (GstV4l2Allocator *) our_mem->mem.allocator;
-  if (allocator == m2m->source_allocator)
-    (*io_mode) = m2m->source_iomode;
-  else
-    (*io_mode) = m2m->sink_iomode;
+
+  if (buf_type) {
+    if (allocator == m2m->source_allocator)
+      (*buf_type) = GST_V4L2_M2M_BUFTYPE_SOURCE;
+    else
+      (*buf_type) = GST_V4L2_M2M_BUFTYPE_SINK;
+  }
+
+  if (io_mode) {
+    if (allocator == m2m->source_allocator)
+      (*io_mode) = m2m->source_iomode;
+    else
+      (*io_mode) = m2m->sink_iomode;
+  }
 
   return allocator;
 }
@@ -302,18 +314,6 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
   if (!m2m->dmabuf_allocator)
     return FALSE;
 
-  ret =
-      v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMON,
-      &m2m->sink_obj->type);
-  if (ret < 0)
-    return FALSE;
-
-  ret =
-      v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMON,
-      &m2m->source_obj->type);
-  if (ret < 0)
-    return FALSE;
-
   return TRUE;
 }
 
@@ -327,27 +327,44 @@ gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
     return &m2m->sink_obj->info;
 }
 
-static void
-on_buffer_finalization (gpointer m2m_p, GstMiniObject * buf_p)
+
+
+gboolean
+gst_v4l2_m2m_reset_buffer (GstV4l2M2m * m2m, GstBuffer * buf)
 {
-  GstV4l2M2m *m2m = (GstV4l2M2m *) m2m_p;
-  GstBuffer *buf = (GstBuffer *) buf_p;
   GstMemory *mem;
   GstV4l2IOMode mode;
   GstV4l2Allocator *allocator;
   GstV4l2MemoryGroup *group;
 
-  allocator = get_allocator_from_buffer (m2m, buf, &mode);
+  allocator = get_allocator_from_buffer (m2m, buf, NULL, &mode);
   if (!allocator)
-    return;
+    return FALSE;
 
   if (mode != GST_V4L2_IO_DMABUF_IMPORT)
-    return;
+    return TRUE;
 
   mem = gst_buffer_peek_memory (buf, 0);
   group = ((GstV4l2Memory *) mem)->group;
   gst_v4l2_allocator_reset_group (allocator, group);
+
+  return TRUE;
 }
+
+
+
+
+static void
+on_buffer_finalization (gpointer m2m_p, GstMiniObject * buf_p)
+{
+  GstV4l2M2m *m2m = (GstV4l2M2m *) m2m_p;
+  GstBuffer *buf = (GstBuffer *) buf_p;
+
+  gst_v4l2_m2m_reset_buffer (m2m, buf);
+}
+
+
+
 
 gboolean
 gst_v4l2_m2m_set_background (GstV4l2M2m * m2m, unsigned int background)
@@ -403,11 +420,16 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
   if (!buf)
     return NULL;
 
+
+
+
   allocator = get_allocator_from_buftype (m2m, buf_type);
   if (!allocator)
     return NULL;
 
   mode = get_io_mode (m2m, buf_type);
+
+
 
   switch (mode) {
     case GST_V4L2_IO_DMABUF_IMPORT:
@@ -444,7 +466,7 @@ gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
   GstV4l2IOMode mode;
   GstV4l2Allocator *allocator;
 
-  allocator = get_allocator_from_buffer (m2m, our_buf, &mode);
+  allocator = get_allocator_from_buffer (m2m, our_buf, NULL, &mode);
   if (!allocator)
     return FALSE;
 
@@ -485,70 +507,81 @@ gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char *videodev)
 }
 
 gboolean
-gst_v4l2_m2m_process (GstV4l2M2m * m2m, GstBuffer * srcbuf, GstBuffer * sinkbuf)
+gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf)
 {
   gboolean ok;
-  GstV4l2Memory *srcmem;
-  GstV4l2Memory *sinkmem;
+  GstV4l2Memory *mem;
+  GstV4l2Allocator *allocator;
+  enum GstV4l2M2mBufferType buf_type;
 
-  srcmem =
-      get_memory_object_from_buffer (m2m, srcbuf, GST_V4L2_M2M_BUFTYPE_SOURCE);
-  if (!srcmem)
+  allocator = get_allocator_from_buffer (m2m, buf, &buf_type, NULL);
+  if (!allocator)
     return FALSE;
 
-  sinkmem =
-      get_memory_object_from_buffer (m2m, sinkbuf, GST_V4L2_M2M_BUFTYPE_SINK);
-  if (!sinkmem)
+  mem = get_memory_object_from_buffer (m2m, buf, buf_type);
+  if (!mem)
     return FALSE;
 
-  ok = gst_v4l2_allocator_qbuf (m2m->sink_allocator, sinkmem->group);
-  if (!ok)
-    return FALSE;
-
-  ok = gst_v4l2_allocator_qbuf (m2m->source_allocator, srcmem->group);
+  ok = gst_v4l2_allocator_qbuf (allocator, mem->group);
   if (!ok)
     return FALSE;
 
   return TRUE;
 }
 
+
 gboolean
-gst_v4l2_m2m_wait (GstV4l2M2m * m2m)
+gst_v4l2_m2m_dqbuf (GstV4l2M2m * m2m, GstBuffer * buf)
 {
+  GstV4l2Memory *mem;
+  GstV4l2Allocator *allocator;
   GstFlowReturn flow;
-  GstV4l2MemoryGroup *srcgroup;
-  GstV4l2MemoryGroup *sinkgroup;
+  GstV4l2MemoryGroup *group;
+  enum GstV4l2M2mBufferType buf_type;
 
-  flow = gst_v4l2_allocator_dqbuf (m2m->sink_allocator, &sinkgroup);
+  allocator = get_allocator_from_buffer (m2m, buf, &buf_type, NULL);
+  if (!allocator)
+    return FALSE;
+
+  mem = get_memory_object_from_buffer (m2m, buf, buf_type);
+  if (!mem)
+    return FALSE;
+
+  flow = gst_v4l2_allocator_dqbuf (allocator, &group);
   if (flow != GST_FLOW_OK)
     return FALSE;
 
-  flow = gst_v4l2_allocator_dqbuf (m2m->source_allocator, &srcgroup);
-  if (flow != GST_FLOW_OK)
-    return FALSE;
-
-  if (sinkgroup->n_mem != 1)
-    return FALSE;
-
-  if (srcgroup->n_mem != 1)
+  if (group->n_mem != 1)
     return FALSE;
 
   return TRUE;
 }
+
 
 gboolean
-gst_v4l2_m2m_open (GstV4l2M2m * m2m)
+gst_v4l2_m2m_require_streamon (GstV4l2M2m * m2m)
 {
-  if (!gst_v4l2_object_open (m2m->sink_obj))
+  int ret;
+
+  if (m2m->streaming)
+    return TRUE;
+
+  ret = v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMON,
+      &m2m->sink_obj->type);
+  if (ret < 0)
     return FALSE;
 
-  if (!gst_v4l2_object_open_shared (m2m->source_obj, m2m->sink_obj)) {
-    gst_v4l2_object_close (m2m->sink_obj);
+  ret = v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMON,
+      &m2m->source_obj->type);
+  if (ret < 0)
     return FALSE;
-  }
+
+  m2m->streaming = TRUE;
 
   return TRUE;
 }
+
+
 
 void
 gst_v4l2_m2m_close (GstV4l2M2m * m2m)

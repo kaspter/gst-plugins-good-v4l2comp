@@ -25,6 +25,7 @@
 #include <gst/video/video.h>
 #include "gstv4l2m2m.h"
 #include "gstv4l2videoaggregator.h"
+#include "gstv4l2compositorpad.h"
 
 G_BEGIN_DECLS
 #define GST_TYPE_V4L2_COMPOSITOR (gst_v4l2_compositor_get_type())
@@ -59,7 +60,7 @@ struct _GstV4l2Compositor
   gchar *videodev;
   GstCaps *srccaps;
   gboolean already_negotiated;
-  enum GstV4l2CompositorState state;
+  GstV4l2CompositorPad *first_cpad;
 };
 
 struct _GstV4l2CompositorClass
