@@ -36,6 +36,25 @@ G_BEGIN_DECLS
         (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_V4L2_COMPOSITOR_PAD))
 typedef struct _GstV4l2CompositorPad GstV4l2CompositorPad;
 typedef struct _GstV4l2CompositorPadClass GstV4l2CompositorPadClass;
+typedef struct _GstV4l2CompositorPadJob GstV4l2CompositorPadJob;
+
+
+
+
+struct _GstV4l2CompositorPadJob
+{
+  GstV4l2CompositorPad *cpad;
+  GstBuffer *external_sink_buf;
+  GstBuffer *sink_buf;
+  GstBuffer *source_buf;
+  gboolean source_queued;
+  gboolean sink_queued;
+  gboolean dequeued;
+};
+
+
+
+
 
 /**
  * GstV4l2CompositorPad:
@@ -45,13 +64,8 @@ typedef struct _GstV4l2CompositorPadClass GstV4l2CompositorPadClass;
 struct _GstV4l2CompositorPad
 {
   GstV4l2VideoAggregatorPad parent;
-
   GstV4l2M2m *m2m;
-  GstBuffer *source_buf;
-  GstBuffer *sink_buf;
-  gboolean source_queued;
-  gboolean sink_queued;
-  gboolean dequeued;
+  GList * jobs;
 
   /* properties */
   gint xpos, ypos;
@@ -63,8 +77,6 @@ struct _GstV4l2CompositorPad
   GstVideoConverter *convert;
   GstVideoInfo conversion_info;
   GstBuffer *converted_buffer;
-
-  int num;
 };
 
 struct _GstV4l2CompositorPadClass

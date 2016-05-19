@@ -44,6 +44,7 @@ struct _GstV4l2M2m
   GstV4l2IOMode source_iomode;
   GstV4l2IOMode sink_iomode;
   gboolean streaming;
+  int index;
 };
 
 enum GstV4l2M2mBufferType
@@ -54,7 +55,7 @@ enum GstV4l2M2mBufferType
 };
 
 /* create/destroy */
-GstV4l2M2m *gst_v4l2_m2m_new (GstElement * parent);
+GstV4l2M2m *gst_v4l2_m2m_new (GstElement * parent, int index);
 
 void gst_v4l2_m2m_destroy (GstV4l2M2m * m2m);
 

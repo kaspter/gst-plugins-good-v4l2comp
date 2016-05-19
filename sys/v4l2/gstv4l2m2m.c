@@ -28,11 +28,43 @@
 #include "v4l2_calls.h"
 #include "gst/allocators/gstdmabuf.h"
 
+
+void trace_event (const char *format, void *a0, void *a1, void *a2, void *a3);
+
+static inline void
+traceQ (int pad, int fd, const char *content)
+{
+  trace_event ("[%f]: pad=%d fd=%d #queue %s", (void *) pad, (void *) fd,
+      (void *) content, NULL);
+}
+
+static inline void
+traceDQ (int pad, int fd, const char *content)
+{
+  trace_event ("[%f]: pad=%d fd=%d #dequeue %s", (void *) pad, (void *) fd,
+      (void *) content, NULL);
+}
+
+static inline void
+traceA (int pad, void *buf)
+{
+  trace_event ("[%f]: pad=%d buf=%p #alloc", (void *) pad, buf, NULL, NULL);
+}
+
+static inline void
+traceD (int pad, void *buf)
+{
+  trace_event ("[%f]: pad=%d buf=%p #destroy", (void *) pad, buf, NULL, NULL);
+}
+
+
+
+
 GST_DEBUG_CATEGORY_EXTERN (v4l2_debug);
 #define GST_CAT_DEFAULT v4l2_debug
 
 GstV4l2M2m *
-gst_v4l2_m2m_new (GstElement * parent)
+gst_v4l2_m2m_new (GstElement * parent, int index)
 {
   GstV4l2M2m *m2m;
   GstV4l2UpdateFpsFunction update_fps_func = NULL;
@@ -41,6 +73,7 @@ gst_v4l2_m2m_new (GstElement * parent)
   m2m = (GstV4l2M2m *) g_new0 (GstV4l2M2m, 1);
 
   m2m->parent = parent;
+  m2m->index = index;
 
   m2m->sink_iomode = GST_V4L2_IO_AUTO;
   m2m->source_iomode = GST_V4L2_IO_AUTO;
@@ -273,6 +306,7 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
   if (ret < 0)
     return FALSE;
   sink_nbufs = control.value;
+  sink_nbufs = 8;
 
   ok = gst_v4l2_object_set_format (m2m->sink_obj, sink_caps);
   if (!ok)
@@ -298,6 +332,7 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
   if (ret < 0)
     return FALSE;
   source_nbufs = control.value;
+  source_nbufs = 8;
 
   ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, &memory);
   if (!ok)
@@ -336,6 +371,8 @@ gst_v4l2_m2m_reset_buffer (GstV4l2M2m * m2m, GstBuffer * buf)
   GstV4l2IOMode mode;
   GstV4l2Allocator *allocator;
   GstV4l2MemoryGroup *group;
+
+  traceD (m2m->index, buf);
 
   allocator = get_allocator_from_buffer (m2m, buf, NULL, &mode);
   if (!allocator)
@@ -420,16 +457,11 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
   if (!buf)
     return NULL;
 
-
-
-
   allocator = get_allocator_from_buftype (m2m, buf_type);
   if (!allocator)
     return NULL;
 
   mode = get_io_mode (m2m, buf_type);
-
-
 
   switch (mode) {
     case GST_V4L2_IO_DMABUF_IMPORT:
@@ -451,6 +483,8 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
 
   gst_mini_object_weak_ref ((GstMiniObject *) buf, on_buffer_finalization,
       (gpointer) m2m);
+
+  traceA (m2m->index, buf);
 
   return buf;
 }
@@ -485,6 +519,7 @@ gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
   return TRUE;
 }
 
+
 void
 gst_v4l2_m2m_set_sink_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode)
 {
@@ -506,6 +541,7 @@ gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char *videodev)
   m2m->sink_obj->videodev = g_strdup (videodev);
 }
 
+
 gboolean
 gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf)
 {
@@ -521,6 +557,15 @@ gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf)
   mem = get_memory_object_from_buffer (m2m, buf, buf_type);
   if (!mem)
     return FALSE;
+
+  {
+    const char *content;
+    if (buf_type == GST_V4L2_M2M_BUFTYPE_SOURCE)
+      content = "source";
+    else
+      content = "sink";
+    traceQ (m2m->index, mem->dmafd, content);
+  }
 
   ok = gst_v4l2_allocator_qbuf (allocator, mem->group);
   if (!ok)
@@ -550,6 +595,15 @@ gst_v4l2_m2m_dqbuf (GstV4l2M2m * m2m, GstBuffer * buf)
   flow = gst_v4l2_allocator_dqbuf (allocator, &group);
   if (flow != GST_FLOW_OK)
     return FALSE;
+
+  {
+    const char *content;
+    if (buf_type == GST_V4L2_M2M_BUFTYPE_SOURCE)
+      content = "source";
+    else
+      content = "sink";
+    traceDQ (m2m->index, mem->dmafd, content);
+  }
 
   if (group->n_mem != 1)
     return FALSE;
