@@ -22,6 +22,7 @@
 #endif
 
 #include <string.h>
+#include <stdio.h>
 
 #include "gstv4l2m2m.h"
 #include "gstv4l2object.h"
@@ -29,36 +30,7 @@
 #include "gst/allocators/gstdmabuf.h"
 
 
-void trace_event (const char *format, void *a0, void *a1, void *a2, void *a3);
-
-static inline void
-traceQ (int pad, int fd, const char *content)
-{
-  trace_event ("[%f]: pad=%d fd=%d #queue %s", (void *) pad, (void *) fd,
-      (void *) content, NULL);
-}
-
-static inline void
-traceDQ (int pad, int fd, const char *content)
-{
-  trace_event ("[%f]: pad=%d fd=%d #dequeue %s", (void *) pad, (void *) fd,
-      (void *) content, NULL);
-}
-
-static inline void
-traceA (int pad, void *buf)
-{
-  trace_event ("[%f]: pad=%d buf=%p #alloc", (void *) pad, buf, NULL, NULL);
-}
-
-static inline void
-traceD (int pad, void *buf)
-{
-  trace_event ("[%f]: pad=%d buf=%p #destroy", (void *) pad, buf, NULL, NULL);
-}
-
-
-
+void sebgst_trace (const char *format, ...);
 
 GST_DEBUG_CATEGORY_EXTERN (v4l2_debug);
 #define GST_CAT_DEFAULT v4l2_debug
@@ -163,32 +135,29 @@ get_v4l2_memory (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type,
   }
 }
 
+
 static GstV4l2Memory *
-get_memory_object_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
+get_memory_from_memory (GstV4l2M2m * m2m, GstMemory * mem,
     enum GstV4l2M2mBufferType buf_type)
 {
-  GstV4l2Memory *our_mem;
-
-  our_mem = (GstV4l2Memory *) gst_buffer_peek_memory (our_buf, 0);
-
-  if (our_mem->mem.allocator == (GstAllocator *) m2m->source_allocator) {
+  if (mem->allocator == (GstAllocator *) m2m->source_allocator) {
     goto our_buffer;
   }
 
-  else if (our_mem->mem.allocator == (GstAllocator *) m2m->sink_allocator) {
+  else if (mem->allocator == (GstAllocator *) m2m->sink_allocator) {
     goto our_buffer;
   }
 
-  else if (our_mem->mem.allocator == m2m->dmabuf_allocator) {
-    our_mem = (GstV4l2Memory *)
-        gst_mini_object_get_qdata (GST_MINI_OBJECT (our_mem),
+  else if (mem->allocator == m2m->dmabuf_allocator) {
+    mem = (GstMemory *)
+        gst_mini_object_get_qdata (GST_MINI_OBJECT (mem),
         GST_V4L2_MEMORY_QUARK);
 
-    if (our_mem->mem.allocator == (GstAllocator *) m2m->source_allocator) {
+    if (mem->allocator == (GstAllocator *) m2m->source_allocator) {
       goto our_buffer;
     }
 
-    else if (our_mem->mem.allocator != (GstAllocator *) m2m->sink_allocator) {
+    else if (mem->allocator != (GstAllocator *) m2m->sink_allocator) {
       goto our_buffer;
     }
 
@@ -204,19 +173,19 @@ get_memory_object_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
 our_buffer:
   switch (buf_type) {
     case GST_V4L2_M2M_BUFTYPE_SOURCE:
-      if (our_mem->mem.allocator != (GstAllocator *) m2m->source_allocator)
+      if (mem->allocator != (GstAllocator *) m2m->source_allocator)
         goto bad_requested_buffer_type;
       else
-        return our_mem;
+        return (GstV4l2Memory *) mem;
 
     case GST_V4L2_M2M_BUFTYPE_SINK:
-      if (our_mem->mem.allocator != (GstAllocator *) m2m->sink_allocator)
+      if (mem->allocator != (GstAllocator *) m2m->sink_allocator)
         goto bad_requested_buffer_type;
       else
-        return our_mem;
+        return (GstV4l2Memory *) mem;
 
     case GST_V4L2_M2M_BUFTYPE_ANY:
-      return our_mem;
+      return (GstV4l2Memory *) mem;
 
     default:
       goto bad_requested_buffer_type;
@@ -230,35 +199,53 @@ not_our_buffer:
   return NULL;
 }
 
+
+
+static GstV4l2Memory *
+get_memory_from_buffer (GstV4l2M2m * m2m, GstBuffer * buffer,
+    enum GstV4l2M2mBufferType buf_type)
+{
+  GstMemory *mem;
+  mem = gst_buffer_peek_memory (buffer, 0);
+  return get_memory_from_memory (m2m, mem, buf_type);
+}
+
+
+
+
+
 static GstV4l2Allocator *
-get_allocator_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
-    enum GstV4l2M2mBufferType *buf_type, GstV4l2IOMode * io_mode)
+get_allocator_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf)
 {
   GstV4l2Memory *our_mem;
   GstV4l2Allocator *allocator;
 
-  our_mem =
-      get_memory_object_from_buffer (m2m, our_buf, GST_V4L2_M2M_BUFTYPE_ANY);
+  our_mem = get_memory_from_buffer (m2m, our_buf, GST_V4L2_M2M_BUFTYPE_ANY);
   if (our_buf == NULL)
     return NULL;
 
   allocator = (GstV4l2Allocator *) our_mem->mem.allocator;
-
-  if (buf_type) {
-    if (allocator == m2m->source_allocator)
-      (*buf_type) = GST_V4L2_M2M_BUFTYPE_SOURCE;
-    else
-      (*buf_type) = GST_V4L2_M2M_BUFTYPE_SINK;
-  }
-
-  if (io_mode) {
-    if (allocator == m2m->source_allocator)
-      (*io_mode) = m2m->source_iomode;
-    else
-      (*io_mode) = m2m->sink_iomode;
-  }
-
   return allocator;
+}
+
+
+static enum GstV4l2M2mBufferType
+get_buftype_from_allocator (GstV4l2M2m * m2m, GstV4l2Allocator * allocator)
+{
+  if (allocator == m2m->source_allocator)
+    return GST_V4L2_M2M_BUFTYPE_SOURCE;
+  else
+    return GST_V4L2_M2M_BUFTYPE_SINK;
+}
+
+
+static GstV4l2IOMode
+get_iomode_from_allocator (GstV4l2M2m * m2m, GstV4l2Allocator * allocator)
+{
+  if (allocator == m2m->source_allocator)
+    return m2m->source_iomode;
+  else
+    return m2m->sink_iomode;
 }
 
 static GstV4l2Allocator *
@@ -301,12 +288,16 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
   struct v4l2_control control;
   int sink_nbufs, source_nbufs;
 
+
+#define NBUFS 16
+
+
   control.id = V4L2_CID_MIN_BUFFERS_FOR_OUTPUT;
   ret = v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_G_CTRL, &control);
   if (ret < 0)
     return FALSE;
   sink_nbufs = control.value;
-  sink_nbufs = 8;
+  sink_nbufs = NBUFS;
 
   ok = gst_v4l2_object_set_format (m2m->sink_obj, sink_caps);
   if (!ok)
@@ -332,7 +323,7 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
   if (ret < 0)
     return FALSE;
   source_nbufs = control.value;
-  source_nbufs = 8;
+  source_nbufs = NBUFS;
 
   ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, &memory);
   if (!ok)
@@ -372,11 +363,11 @@ gst_v4l2_m2m_reset_buffer (GstV4l2M2m * m2m, GstBuffer * buf)
   GstV4l2Allocator *allocator;
   GstV4l2MemoryGroup *group;
 
-  traceD (m2m->index, buf);
-
-  allocator = get_allocator_from_buffer (m2m, buf, NULL, &mode);
+  allocator = get_allocator_from_buffer (m2m, buf);
   if (!allocator)
     return FALSE;
+
+  mode = get_iomode_from_allocator (m2m, allocator);
 
   if (mode != GST_V4L2_IO_DMABUF_IMPORT)
     return TRUE;
@@ -484,8 +475,6 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
   gst_mini_object_weak_ref ((GstMiniObject *) buf, on_buffer_finalization,
       (gpointer) m2m);
 
-  traceA (m2m->index, buf);
-
   return buf;
 }
 
@@ -500,10 +489,11 @@ gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
   GstV4l2IOMode mode;
   GstV4l2Allocator *allocator;
 
-  allocator = get_allocator_from_buffer (m2m, our_buf, NULL, &mode);
+  allocator = get_allocator_from_buffer (m2m, our_buf);
   if (!allocator)
     return FALSE;
 
+  mode = get_iomode_from_allocator (m2m, allocator);
   if (mode != GST_V4L2_IO_DMABUF_IMPORT)
     return FALSE;
 
@@ -550,26 +540,23 @@ gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf)
   GstV4l2Allocator *allocator;
   enum GstV4l2M2mBufferType buf_type;
 
-  allocator = get_allocator_from_buffer (m2m, buf, &buf_type, NULL);
+  allocator = get_allocator_from_buffer (m2m, buf);
   if (!allocator)
     return FALSE;
 
-  mem = get_memory_object_from_buffer (m2m, buf, buf_type);
+  buf_type = get_buftype_from_allocator (m2m, allocator);
+
+  mem = get_memory_from_buffer (m2m, buf, GST_V4L2_M2M_BUFTYPE_ANY);
   if (!mem)
     return FALSE;
-
-  {
-    const char *content;
-    if (buf_type == GST_V4L2_M2M_BUFTYPE_SOURCE)
-      content = "source";
-    else
-      content = "sink";
-    traceQ (m2m->index, mem->dmafd, content);
-  }
 
   ok = gst_v4l2_allocator_qbuf (allocator, mem->group);
   if (!ok)
     return FALSE;
+
+  sebgst_trace ("#queue buftype=%d fd=%d pad=%d seq=%d idx=%02d",
+      buf_type, mem->dmafd, m2m->index, mem->group->buffer.sequence,
+      mem->group->buffer.index);
 
   return TRUE;
 }
@@ -578,32 +565,31 @@ gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf)
 gboolean
 gst_v4l2_m2m_dqbuf (GstV4l2M2m * m2m, GstBuffer * buf)
 {
+  GstV4l2Memory *memp;
   GstV4l2Memory *mem;
   GstV4l2Allocator *allocator;
   GstFlowReturn flow;
   GstV4l2MemoryGroup *group;
   enum GstV4l2M2mBufferType buf_type;
 
-  allocator = get_allocator_from_buffer (m2m, buf, &buf_type, NULL);
+  allocator = get_allocator_from_buffer (m2m, buf);
   if (!allocator)
     return FALSE;
 
-  mem = get_memory_object_from_buffer (m2m, buf, buf_type);
-  if (!mem)
-    return FALSE;
+  buf_type = get_buftype_from_allocator (m2m, allocator);
 
   flow = gst_v4l2_allocator_dqbuf (allocator, &group);
   if (flow != GST_FLOW_OK)
     return FALSE;
 
-  {
-    const char *content;
-    if (buf_type == GST_V4L2_M2M_BUFTYPE_SOURCE)
-      content = "source";
-    else
-      content = "sink";
-    traceDQ (m2m->index, mem->dmafd, content);
-  }
+  mem = get_memory_from_memory (m2m, group->mem[0], GST_V4L2_M2M_BUFTYPE_ANY);
+  memp = get_memory_from_buffer (m2m, buf, buf_type);
+  if (mem != memp)
+    return FALSE;
+
+  sebgst_trace ("#dequeue buftype=%d fd=%d pad=%d seq=%d idx=%02d",
+      buf_type, mem->dmafd, m2m->index, mem->group->buffer.sequence,
+      mem->group->buffer.index);
 
   if (group->n_mem != 1)
     return FALSE;

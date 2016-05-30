@@ -19,7 +19,7 @@ libgstvideo4linux2_la_SOURCES = gstv4l2.c \
 				gstv4l2videoaggregator.c \
 				gstv4l2videodec.c \
 				gstv4l2videoenc.c \
-				trace.c \
+				sebgst_trace.c \
 				gstv4l2h264enc.c \
 				gstv4l2vidorient.c \
 				v4l2_calls.c \

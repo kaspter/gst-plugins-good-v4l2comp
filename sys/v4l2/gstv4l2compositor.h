@@ -59,8 +59,10 @@ struct _GstV4l2Compositor
   GstV4l2VideoAggregator videoaggregator;
   gchar *videodev;
   GstCaps *srccaps;
+  GstV4l2CompositorPad *master_cpad;
   gboolean already_negotiated;
-  GstV4l2CompositorPad *first_cpad;
+  GHashTable *job_pool;
+  int number_of_sinkpads;
 };
 
 struct _GstV4l2CompositorClass
