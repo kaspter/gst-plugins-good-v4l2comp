@@ -6,8 +6,10 @@ libgstvideo4linux2_la_SOURCES = gstv4l2.c \
 				gstv4l2aggregator.c \
 				gstv4l2allocator.c \
 				gstv4l2colorbalance.c \
+				gstv4l2compositor.c \
 				gstv4l2deviceprovider.c \
 				gstv4l2object.c \
+				gstv4l2m2m.c \
 				gstv4l2bufferpool.c \
 				gstv4l2sink.c \
 				gstv4l2src.c \
