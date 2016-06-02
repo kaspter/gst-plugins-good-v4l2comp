@@ -1137,7 +1137,7 @@ gst_v4l2_transform_class_init (GstV4l2TransformClass * klass)
   base_transform_class->transform =
       GST_DEBUG_FUNCPTR (gst_v4l2_transform_transform);
 
-  base_transform_class->passthrough_on_same_caps = TRUE;
+  base_transform_class->passthrough_on_same_caps = FALSE;
 
   element_class->change_state =
       GST_DEBUG_FUNCPTR (gst_v4l2_transform_change_state);
