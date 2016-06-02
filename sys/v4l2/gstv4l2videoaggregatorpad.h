@@ -18,35 +18,35 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef __GST_VIDEO_AGGREGATOR_PAD_H__
-#define __GST_VIDEO_AGGREGATOR_PAD_H__
+#ifndef __GST_V4L2_VIDEO_AGGREGATOR_PAD_H__
+#define __GST_V4L2_VIDEO_AGGREGATOR_PAD_H__
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
 
-#include <gst/base/gstaggregator.h>
-#include "gstvideoaggregator.h"
+#include <gstv4l2aggregator.h>
+#include "gstv4l2videoaggregator.h"
 
 G_BEGIN_DECLS
 
-#define GST_TYPE_VIDEO_AGGREGATOR_PAD (gst_video_aggregator_pad_get_type())
-#define GST_VIDEO_AGGREGATOR_PAD(obj) \
-        (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_VIDEO_AGGREGATOR_PAD, GstVideoAggregatorPad))
-#define GST_VIDEO_AGGREGATOR_PAD_CLASS(klass) \
-        (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_COMPOSITOR_PAD, GstVideoAggregatorPadClass))
+#define GST_TYPE_V4L2_VIDEO_AGGREGATOR_PAD (gst_v4l2_video_aggregator_pad_get_type())
+#define GST_V4L2_VIDEO_AGGREGATOR_PAD(obj) \
+        (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_V4L2_VIDEO_AGGREGATOR_PAD, GstV4l2VideoAggregatorPad))
+#define GST_V4L2_VIDEO_AGGREGATOR_PAD_CLASS(klass) \
+        (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_COMPOSITOR_PAD, GstV4l2VideoAggregatorPadClass))
 #define GST_IS_VIDEO_AGGREGATOR_PAD(obj) \
-        (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_VIDEO_AGGREGATOR_PAD))
+        (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_V4L2_VIDEO_AGGREGATOR_PAD))
 #define GST_IS_VIDEO_AGGREGATOR_PAD_CLASS(klass) \
-        (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_VIDEO_AGGREGATOR_PAD))
-#define GST_VIDEO_AGGREGATOR_PAD_GET_CLASS(obj) \
-        (G_TYPE_INSTANCE_GET_CLASS((obj),GST_TYPE_VIDEO_AGGREGATOR_PAD,GstVideoAggregatorPadClass))
+        (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_V4L2_VIDEO_AGGREGATOR_PAD))
+#define GST_V4L2_VIDEO_AGGREGATOR_PAD_GET_CLASS(obj) \
+        (G_TYPE_INSTANCE_GET_CLASS((obj),GST_TYPE_V4L2_VIDEO_AGGREGATOR_PAD,GstV4l2VideoAggregatorPadClass))
 
-typedef struct _GstVideoAggregatorPad GstVideoAggregatorPad;
-typedef struct _GstVideoAggregatorPadClass GstVideoAggregatorPadClass;
-typedef struct _GstVideoAggregatorPadPrivate GstVideoAggregatorPadPrivate;
+typedef struct _GstV4l2VideoAggregatorPad GstV4l2VideoAggregatorPad;
+typedef struct _GstV4l2VideoAggregatorPadClass GstV4l2VideoAggregatorPadClass;
+typedef struct _GstV4l2VideoAggregatorPadPrivate GstV4l2VideoAggregatorPadPrivate;
 
 /**
- * GstVideoAggregatorPad:
+ * GstV4l2VideoAggregatorPad:
  * @info: The #GstVideoInfo currently set on the pad
  * @buffer_vinfo: The #GstVideoInfo representing the type contained
  *                in @buffer
@@ -54,16 +54,16 @@ typedef struct _GstVideoAggregatorPadPrivate GstVideoAggregatorPadPrivate;
  *                    inside the aggregate_frames vmethod.
  * @zorder: The zorder of this pad
  */
-struct _GstVideoAggregatorPad
+struct _GstV4l2VideoAggregatorPad
 {
-  GstAggregatorPad parent;
+  GstV4l2AggregatorPad parent;
 
   GstVideoInfo info;
 
   GstBuffer *buffer;
   /* The caps on the pad may not match the buffer above because of two reasons:
    * 1) When caps change, the info above will get updated, but the buffer might
-   *    not since it might be pending on the GstAggregatorPad
+   *    not since it might be pending on the GstV4l2AggregatorPad
    * 2) We might reject the new buffer in fill_queues() and reuse a previous
    *    buffer which has older GstVideoInfo
    * Hence, we need to maintain a GstVideoInfo for mapping buffers separately */
@@ -76,12 +76,12 @@ struct _GstVideoAggregatorPad
   gboolean ignore_eos;
 
   /* < private > */
-  GstVideoAggregatorPadPrivate *priv;
+  GstV4l2VideoAggregatorPadPrivate *priv;
   gpointer          _gst_reserved[GST_PADDING];
 };
 
 /**
- * GstVideoAggregatorPadClass:
+ * GstV4l2VideoAggregatorPadClass:
  *
  * @set_info: Lets subclass set a converter on the pad,
  *                 right after a new format has been negotiated.
@@ -89,24 +89,24 @@ struct _GstVideoAggregatorPad
  *                 and sets it to @aggregated_frame
  * @clean_frame:   clean the frame previously prepared in prepare_frame
  */
-struct _GstVideoAggregatorPadClass
+struct _GstV4l2VideoAggregatorPadClass
 {
-  GstAggregatorPadClass parent_class;
-  gboolean           (*set_info)              (GstVideoAggregatorPad * pad,
-                                               GstVideoAggregator    * videoaggregator,
+  GstV4l2AggregatorPadClass parent_class;
+  gboolean           (*set_info)              (GstV4l2VideoAggregatorPad * pad,
+                                               GstV4l2VideoAggregator    * videoaggregator,
                                                GstVideoInfo          * current_info,
                                                GstVideoInfo          * wanted_info);
 
-  gboolean           (*prepare_frame)         (GstVideoAggregatorPad * pad,
-                                               GstVideoAggregator    * videoaggregator);
+  gboolean           (*prepare_frame)         (GstV4l2VideoAggregatorPad * pad,
+                                               GstV4l2VideoAggregator    * videoaggregator);
 
-  void               (*clean_frame)           (GstVideoAggregatorPad * pad,
-                                               GstVideoAggregator    * videoaggregator);
+  void               (*clean_frame)           (GstV4l2VideoAggregatorPad * pad,
+                                               GstV4l2VideoAggregator    * videoaggregator);
 
   gpointer          _gst_reserved[GST_PADDING_LARGE];
 };
 
-GType gst_video_aggregator_pad_get_type (void);
+GType gst_v4l2_video_aggregator_pad_get_type (void);
 
 G_END_DECLS
-#endif /* __GST_VIDEO_AGGREGATOR_PAD_H__ */
+#endif /* __GST_V4L2_VIDEO_AGGREGATOR_PAD_H__ */

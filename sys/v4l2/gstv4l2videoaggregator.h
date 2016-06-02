@@ -18,8 +18,8 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef __GST_VIDEO_AGGREGATOR_H__
-#define __GST_VIDEO_AGGREGATOR_H__
+#ifndef __GST_V4L2_VIDEO_AGGREGATOR_H__
+#define __GST_V4L2_VIDEO_AGGREGATOR_H__
 
 #ifndef GST_USE_UNSTABLE_API
 #warning "The Video library from gst-plugins-bad is unstable API and may change in future."
@@ -28,48 +28,48 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include <gst/base/gstaggregator.h>
+#include <gstv4l2aggregator.h>
 
 G_BEGIN_DECLS
 
-#define GST_TYPE_VIDEO_AGGREGATOR (gst_video_aggregator_get_type())
-#define GST_VIDEO_AGGREGATOR(obj) \
-        (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_VIDEO_AGGREGATOR, GstVideoAggregator))
-#define GST_VIDEO_AGGREGATOR_CLASS(klass) \
-        (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_VIDEO_AGGREGATOR, GstVideoAggregatorClass))
+#define GST_TYPE_V4L2_VIDEO_AGGREGATOR (gst_v4l2_video_aggregator_get_type())
+#define GST_V4L2_VIDEO_AGGREGATOR(obj) \
+        (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_V4L2_VIDEO_AGGREGATOR, GstV4l2VideoAggregator))
+#define GST_V4L2_VIDEO_AGGREGATOR_CLASS(klass) \
+        (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_V4L2_VIDEO_AGGREGATOR, GstV4l2VideoAggregatorClass))
 #define GST_IS_VIDEO_AGGREGATOR(obj) \
-        (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_VIDEO_AGGREGATOR))
+        (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_V4L2_VIDEO_AGGREGATOR))
 #define GST_IS_VIDEO_AGGREGATOR_CLASS(klass) \
-        (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_VIDEO_AGGREGATOR))
-#define GST_VIDEO_AGGREGATOR_GET_CLASS(obj) \
-        (G_TYPE_INSTANCE_GET_CLASS((obj),GST_TYPE_VIDEO_AGGREGATOR,GstVideoAggregatorClass))
+        (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_V4L2_VIDEO_AGGREGATOR))
+#define GST_V4L2_VIDEO_AGGREGATOR_GET_CLASS(obj) \
+        (G_TYPE_INSTANCE_GET_CLASS((obj),GST_TYPE_V4L2_VIDEO_AGGREGATOR,GstV4l2VideoAggregatorClass))
 
-typedef struct _GstVideoAggregator GstVideoAggregator;
-typedef struct _GstVideoAggregatorClass GstVideoAggregatorClass;
-typedef struct _GstVideoAggregatorPrivate GstVideoAggregatorPrivate;
+typedef struct _GstV4l2VideoAggregator GstV4l2VideoAggregator;
+typedef struct _GstV4l2VideoAggregatorClass GstV4l2VideoAggregatorClass;
+typedef struct _GstV4l2VideoAggregatorPrivate GstV4l2VideoAggregatorPrivate;
 
-#include "gstvideoaggregatorpad.h"
+#include "gstv4l2videoaggregatorpad.h"
 
 /**
- * GstVideoAggregator:
+ * GstV4l2VideoAggregator:
  * @info: The #GstVideoInfo representing the currently set
  * srcpad caps.
  */
-struct _GstVideoAggregator
+struct _GstV4l2VideoAggregator
 {
-  GstAggregator aggregator;
+  GstV4l2Aggregator aggregator;
 
   /*< public >*/
   /* Output caps */
   GstVideoInfo info;
 
   /* < private > */
-  GstVideoAggregatorPrivate *priv;
+  GstV4l2VideoAggregatorPrivate *priv;
   gpointer          _gst_reserved[GST_PADDING_LARGE];
 };
 
 /**
- * GstVideoAggregatorClass:
+ * GstV4l2VideoAggregatorClass:
  * @update_caps:              Optional.
  *                            Lets subclasses update the #GstCaps representing
  *                            the src pad caps before usage.  Return %NULL to indicate failure.
@@ -78,8 +78,8 @@ struct _GstVideoAggregator
  *                            @caps. @caps is not guaranteed to be writable.
  * @aggregate_frames:         Lets subclasses aggregate frames that are ready. Subclasses
  *                            should iterate the GstElement.sinkpads and use the already
- *                            mapped #GstVideoFrame from GstVideoAggregatorPad.aggregated_frame
- *                            or directly use the #GstBuffer from GstVideoAggregatorPad.buffer
+ *                            mapped #GstVideoFrame from GstV4l2VideoAggregatorPad.aggregated_frame
+ *                            or directly use the #GstBuffer from GstV4l2VideoAggregatorPad.buffer
  *                            if it needs to map the buffer in a special way. The result of the
  *                            aggregation should land in @outbuffer.
  * @get_output_buffer:        Optional.
@@ -90,24 +90,24 @@ struct _GstVideoAggregator
  * @find_best_format:         Optional.
  *                            Lets subclasses decide of the best common format to use.
  **/
-struct _GstVideoAggregatorClass
+struct _GstV4l2VideoAggregatorClass
 {
   /*< private >*/
-  GstAggregatorClass parent_class;
+  GstV4l2AggregatorClass parent_class;
 
   /*< public >*/
-  GstCaps *          (*update_caps)               (GstVideoAggregator *  videoaggregator,
+  GstCaps *          (*update_caps)               (GstV4l2VideoAggregator *  videoaggregator,
                                                    GstCaps            *  caps,
                                                    GstCaps            *  filter_caps);
-  GstCaps *          (*fixate_caps)               (GstVideoAggregator *  videoaggregator,
+  GstCaps *          (*fixate_caps)               (GstV4l2VideoAggregator *  videoaggregator,
                                                    GstCaps            *  caps);
-  GstFlowReturn      (*aggregate_frames)          (GstVideoAggregator *  videoaggregator,
+  GstFlowReturn      (*aggregate_frames)          (GstV4l2VideoAggregator *  videoaggregator,
                                                    GstBuffer          *  outbuffer);
-  GstFlowReturn      (*get_output_buffer)         (GstVideoAggregator *  videoaggregator,
+  GstFlowReturn      (*get_output_buffer)         (GstV4l2VideoAggregator *  videoaggregator,
                                                    GstBuffer          ** outbuffer);
-  gboolean           (*negotiated_caps)           (GstVideoAggregator *  videoaggregator,
+  gboolean           (*negotiated_caps)           (GstV4l2VideoAggregator *  videoaggregator,
                                                    GstCaps            *  caps);
-  void               (*find_best_format)          (GstVideoAggregator *  vagg,
+  void               (*find_best_format)          (GstV4l2VideoAggregator *  vagg,
                                                    GstCaps            *  downstream_caps,
                                                    GstVideoInfo       *  best_info,
                                                    gboolean           *  at_least_one_alpha);
@@ -118,7 +118,7 @@ struct _GstVideoAggregatorClass
   gpointer            _gst_reserved[GST_PADDING_LARGE];
 };
 
-GType gst_video_aggregator_get_type       (void);
+GType gst_v4l2_video_aggregator_get_type       (void);
 
 G_END_DECLS
-#endif /* __GST_VIDEO_AGGREGATOR_H__ */
+#endif /* __GST_V4L2_VIDEO_AGGREGATOR_H__ */
