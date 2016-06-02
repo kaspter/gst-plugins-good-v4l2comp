@@ -26,6 +26,9 @@
 #include "v4l2_calls.h"
 #include "gst/allocators/gstdmabuf.h"
 
+
+void sebgst_trace (const char *format, ...);
+
 GST_DEBUG_CATEGORY_EXTERN (v4l2_debug);
 #define GST_CAT_DEFAULT v4l2_debug
 
@@ -511,10 +514,13 @@ gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf)
   gboolean ok;
   GstV4l2Memory *mem;
   GstV4l2Allocator *allocator;
+  enum GstV4l2M2mBufferType buf_type;
 
   allocator = get_allocator_from_buffer (m2m, buf);
   if (!allocator)
     return FALSE;
+
+  buf_type = get_buftype_from_allocator (m2m, allocator);
 
   mem = get_memory_from_buffer (m2m, buf, GST_V4L2_M2M_BUFTYPE_ANY);
   if (!mem)
@@ -523,6 +529,10 @@ gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf)
   ok = gst_v4l2_allocator_qbuf (allocator, mem->group);
   if (!ok)
     return FALSE;
+
+  sebgst_trace ("#queue buftype=%d fd=%d pad=%d seq=%d idx=%02d",
+      buf_type, mem->dmafd, m2m->index, mem->group->buffer.sequence,
+      mem->group->buffer.index);
 
   return TRUE;
 }
@@ -551,6 +561,10 @@ gst_v4l2_m2m_dqbuf (GstV4l2M2m * m2m, GstBuffer * buf)
   memp = get_memory_from_buffer (m2m, buf, buf_type);
   if (mem != memp)
     return FALSE;
+
+  sebgst_trace ("#dequeue buftype=%d fd=%d pad=%d seq=%d idx=%02d",
+      buf_type, mem->dmafd, m2m->index, mem->group->buffer.sequence,
+      mem->group->buffer.index);
 
   if (group->n_mem != 1)
     return FALSE;

@@ -62,6 +62,9 @@ enum
 G_DEFINE_TYPE (GstV4l2CompositorPad, gst_v4l2_compositor_pad,
     GST_TYPE_V4L2_VIDEO_AGGREGATOR_PAD);
 
+
+void sebgst_trace (const char *format, ...);
+
 static void
 gst_v4l2_compositor_pad_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec)
@@ -625,6 +628,8 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
   GstBuffer *outbuf;
 
+  sebgst_trace ("#simple #get_output_buffer");
+
   GST_OBJECT_LOCK (vagg);
 
   (*outbuf_p) = NULL;
@@ -658,6 +663,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   }
   if (outbuf) {
     (*outbuf_p) = outbuf;
+    sebgst_trace ("#simple #frame_ok");
   }
 
   GST_OBJECT_UNLOCK (vagg);
