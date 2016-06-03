@@ -368,6 +368,10 @@ on_buffer_finalization (gpointer m2m_p, GstMiniObject * buf_p)
 {
   GstV4l2M2m *m2m = (GstV4l2M2m *) m2m_p;
   GstBuffer *buf = (GstBuffer *) buf_p;
+  GstMemory *mem;
+
+  mem = gst_buffer_peek_memory (buf, 0);
+  sebgst_trace ("#freebuf mem=%p", mem);
 
   gst_v4l2_m2m_reset_buffer (m2m, buf);
 }
@@ -452,6 +456,8 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
 
   gst_mini_object_weak_ref ((GstMiniObject *) buf, on_buffer_finalization,
       (gpointer) m2m);
+
+  sebgst_trace ("#allocbuf mem=%p", mem);
 
   return buf;
 }

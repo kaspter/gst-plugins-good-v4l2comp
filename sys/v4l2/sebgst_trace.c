@@ -16,7 +16,7 @@ struct SebGstEvent
 };
 
 void sebgst_trace (const char *format, ...);
-static void sebgst_trace2 (const char *format, va_list ap);
+static void sebgst_trace_ (const char *format, va_list ap);
 
 static struct SebGstEvent events[MAX_NUM_EVENTS];
 static int num_events = 0;
@@ -43,13 +43,14 @@ sebgst_clock (void)
 
 
 static void
-sebgst_write_events (double t)
+sebgst_write_ (bool force)
 {
   FILE *fh;
   static const char *filename = NULL;
   static double write_delay = -1.0;
   struct SebGstEvent *e;
   int i;
+  double t;
 
   if (written)
     return;
@@ -60,16 +61,18 @@ sebgst_write_events (double t)
       written = true;
   }
 
-  if (write_delay < 0.0) {
-    char *v = getenv ("SEBGST_TRACE_WRITE_DELAY");
-    if (v != NULL)
-      write_delay = atoi (v);
-    else
-      write_delay = 12000.0;
+  if (!force) {
+    if (write_delay < 0.0) {
+      char *v = getenv ("SEBGST_TRACE_WRITE_DELAY");
+      if (v != NULL)
+        write_delay = atoi (v);
+      else
+        write_delay = 12000.0;
+    }
+    t = sebgst_clock ();
+    if (t < write_delay)
+      return;
   }
-
-  if (t < write_delay)
-    return;
 
   fh = fopen (filename, "w");
   for (i = 0; i < num_events; i++) {
@@ -85,7 +88,7 @@ sebgst_write_events (double t)
 
 
 static void
-sebgst_trace2 (const char *format, va_list ap)
+sebgst_trace_ (const char *format, va_list ap)
 {
   struct SebGstEvent *e;
   double t;
@@ -102,7 +105,14 @@ sebgst_trace2 (const char *format, va_list ap)
     num_events++;
   }
 
-  sebgst_write_events (t);
+  sebgst_write_ (false);
+}
+
+
+void
+sebgst_write ()
+{
+  sebgst_write_ (true);
 }
 
 
@@ -111,6 +121,6 @@ sebgst_trace (const char *format, ...)
 {
   va_list ap;
   va_start (ap, format);
-  sebgst_trace2 (format, ap);
+  sebgst_trace_ (format, ap);
   va_end (ap);
 }

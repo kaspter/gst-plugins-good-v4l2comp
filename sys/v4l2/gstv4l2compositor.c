@@ -21,6 +21,8 @@
 #include "config.h"
 #endif
 
+#include <stdio.h>
+
 #include "gstv4l2compositor.h"
 #include "gstv4l2compositorpad.h"
 #include "v4l2_calls.h"
@@ -64,6 +66,7 @@ G_DEFINE_TYPE (GstV4l2CompositorPad, gst_v4l2_compositor_pad,
 
 
 void sebgst_trace (const char *format, ...);
+void sebgst_write ();
 
 static void
 gst_v4l2_compositor_pad_get_property (GObject * object, guint prop_id,
@@ -1085,6 +1088,8 @@ gst_v4l2_compositor_finalize (GObject * object)
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
   GST_DEBUG_OBJECT (self, "called");
+
+  sebgst_write ();
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
