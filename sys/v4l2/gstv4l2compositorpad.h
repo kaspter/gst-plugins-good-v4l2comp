@@ -64,12 +64,6 @@ struct _GstV4l2CompositorPad
   gint xpos, ypos;
   gint width, height;
   gchar *videodev;
-
-  GstBufferPool *peer_pool;
-
-  GstVideoConverter *convert;
-  GstVideoInfo conversion_info;
-  GstBuffer *converted_buffer;
 };
 
 struct _GstV4l2CompositorPadClass
