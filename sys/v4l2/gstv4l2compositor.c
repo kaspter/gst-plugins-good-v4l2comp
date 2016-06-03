@@ -586,9 +586,16 @@ gst_v4l2_compositor_cleanup_jobs (GstV4l2Compositor * self)
     if (job->queued) {
       gst_v4l2_m2m_dqbuf (cpad->m2m, job->source_buf);
       gst_v4l2_m2m_dqbuf (cpad->m2m, job->sink_buf);
+      job->queued = FALSE;
     }
+    if (job->source_buf)
+      gst_buffer_unref (job->source_buf);
+    if (job->sink_buf)
+      gst_buffer_unref (job->sink_buf);
     g_free (job);
   }
+
+  g_hash_table_remove_all (self->job_pool);
 }
 
 static gboolean
@@ -1020,8 +1027,6 @@ gst_v4l2_compositor_finalize (GObject * object)
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
   GST_DEBUG_OBJECT (self, "called");
-
-  g_hash_table_remove_all (self->job_pool);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }

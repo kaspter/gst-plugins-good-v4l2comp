@@ -206,7 +206,7 @@ get_allocator_from_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf)
   GstV4l2Allocator *allocator;
 
   our_mem = get_memory_from_buffer (m2m, our_buf, GST_V4L2_M2M_BUFTYPE_ANY);
-  if (our_buf == NULL)
+  if (our_mem == NULL)
     return NULL;
 
   allocator = (GstV4l2Allocator *) our_mem->mem.allocator;
