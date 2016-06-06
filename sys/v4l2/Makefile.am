@@ -3,16 +3,20 @@ plugin_LTLIBRARIES = libgstvideo4linux2.la
 include $(top_srcdir)/common/gst-glib-gen.mak
 
 libgstvideo4linux2_la_SOURCES = gstv4l2.c \
+				gstv4l2aggregator.c \
 				gstv4l2allocator.c \
 				gstv4l2colorbalance.c \
+				gstv4l2compositor.c \
 				gstv4l2deviceprovider.c \
 				gstv4l2object.c \
+				gstv4l2m2m.c \
 				gstv4l2bufferpool.c \
 				gstv4l2sink.c \
 				gstv4l2src.c \
 				gstv4l2radio.c \
 				gstv4l2tuner.c \
 				gstv4l2transform.c \
+				gstv4l2videoaggregator.c \
 				gstv4l2videodec.c \
 				gstv4l2vidorient.c \
 				v4l2_calls.c \
