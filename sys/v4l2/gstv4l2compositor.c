@@ -145,7 +145,6 @@ gst_v4l2_compositor_pad_clean_frame (GstV4l2VideoAggregatorPad * pad,
 static void
 gst_v4l2_compositor_pad_finalize (GObject * object)
 {
-  GstV4l2CompositorPad *pad = GST_V4L2_COMPOSITOR_PAD (object);
   G_OBJECT_CLASS (gst_v4l2_compositor_pad_parent_class)->finalize (object);
 }
 
@@ -447,6 +446,7 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
   GstV4l2CompositorPad *cpad;
   GstV4l2CompositorPad *master_cpad;
   gboolean ok;
+  int njobs, nbufs;
 
   master_cpad = gst_v4l2_compositor_get_master_pad (self);
   master_job = g_list_nth_data (master_cpad->pending_jobs, 0);
@@ -455,6 +455,10 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     job = g_list_nth_data (cpad->pending_jobs, 0);
     if (job == NULL)
+      return TRUE;
+    njobs = g_list_length (cpad->queued_jobs);
+    nbufs = gst_v4l2_m2m_get_min_sink_buffers (cpad->m2m);
+    if (njobs > nbufs)
       return TRUE;
   }
 
@@ -512,14 +516,15 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self, GstBuffer ** outbuf)
   gboolean ok;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
-  int njobs;
+  int njobs, nbufs;
 
   (*outbuf) = NULL;
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     njobs = g_list_length (cpad->queued_jobs);
-    if (njobs < 5)
+    nbufs = gst_v4l2_m2m_get_min_source_buffers (cpad->m2m);
+    if (njobs <= nbufs)
       return TRUE;
   }
 
@@ -666,7 +671,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
 eos_requested:
   gst_v4l2_compositor_cleanup_jobs (self);
   GST_OBJECT_UNLOCK (vagg);
-  return GST_FLOW_OK;
+  return GST_FLOW_EOS;
 
 failed:
   gst_v4l2_compositor_cleanup_jobs (self);
@@ -717,7 +722,7 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     if (!gst_caps_is_fixed (sinkcaps))
       goto sinkcaps_not_fixed;
 
-    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, sinkcaps))
+    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, sinkcaps, 8))
       goto setup_failed;
 
     gst_v4l2_compositor_get_crop_bounds (self, cpad, &crop_bounds);
