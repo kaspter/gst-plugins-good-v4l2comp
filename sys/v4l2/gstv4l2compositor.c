@@ -717,7 +717,7 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     if (!gst_caps_is_fixed (sinkcaps))
       goto sinkcaps_not_fixed;
 
-    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, sinkcaps))
+    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, sinkcaps, 8))
       goto setup_failed;
 
     gst_v4l2_compositor_get_crop_bounds (self, cpad, &crop_bounds);
