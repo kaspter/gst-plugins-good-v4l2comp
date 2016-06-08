@@ -671,7 +671,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
 eos_requested:
   gst_v4l2_compositor_cleanup_jobs (self);
   GST_OBJECT_UNLOCK (vagg);
-  return GST_FLOW_OK;
+  return GST_FLOW_EOS;
 
 failed:
   gst_v4l2_compositor_cleanup_jobs (self);
