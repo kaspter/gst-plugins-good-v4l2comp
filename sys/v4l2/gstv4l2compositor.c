@@ -145,7 +145,6 @@ gst_v4l2_compositor_pad_clean_frame (GstV4l2VideoAggregatorPad * pad,
 static void
 gst_v4l2_compositor_pad_finalize (GObject * object)
 {
-  GstV4l2CompositorPad *pad = GST_V4L2_COMPOSITOR_PAD (object);
   G_OBJECT_CLASS (gst_v4l2_compositor_pad_parent_class)->finalize (object);
 }
 
