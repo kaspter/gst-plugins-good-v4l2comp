@@ -45,6 +45,8 @@ struct _GstV4l2M2m
   GstV4l2IOMode sink_iomode;
   gboolean streaming;
   int index;
+  int sink_min_buffers;
+  int source_min_buffers;
 };
 
 enum GstV4l2M2mBufferType
@@ -76,12 +78,17 @@ void gst_v4l2_m2m_stop (GstV4l2M2m * m2m);
 
 
 /* specific operations */
+int gst_v4l2_m2m_get_min_source_buffers (GstV4l2M2m * m2m);
 
-gboolean gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * src_caps,
-    GstCaps * sink_caps);
+int gst_v4l2_m2m_get_min_sink_buffers (GstV4l2M2m * m2m);
 
-GstVideoInfo *gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
-    enum GstV4l2M2mBufferType buf_type);
+gboolean gst_v4l2_m2m_setup (GstV4l2M2m * m2m,
+                             GstCaps * source_caps, GstCaps * sink_caps,
+                             int nbufs);
+
+GstVideoInfo *
+gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
+                             enum GstV4l2M2mBufferType buf_type);
 
 GstBuffer *gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type);
