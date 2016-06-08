@@ -447,6 +447,7 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
   GstV4l2CompositorPad *cpad;
   GstV4l2CompositorPad *master_cpad;
   gboolean ok;
+  int njobs, nbufs;
 
   master_cpad = gst_v4l2_compositor_get_master_pad (self);
   master_job = g_list_nth_data (master_cpad->pending_jobs, 0);
@@ -455,6 +456,10 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     job = g_list_nth_data (cpad->pending_jobs, 0);
     if (job == NULL)
+      return TRUE;
+    njobs = g_list_length (cpad->queued_jobs);
+    nbufs = gst_v4l2_m2m_get_min_sink_buffers (cpad->m2m);
+    if (njobs > nbufs)
       return TRUE;
   }
 
@@ -512,14 +517,15 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self, GstBuffer ** outbuf)
   gboolean ok;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
-  int njobs;
+  int njobs, nbufs;
 
   (*outbuf) = NULL;
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     njobs = g_list_length (cpad->queued_jobs);
-    if (njobs < 5)
+    nbufs = gst_v4l2_m2m_get_min_source_buffers (cpad->m2m);
+    if (njobs <= nbufs)
       return TRUE;
   }
 
