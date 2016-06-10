@@ -52,8 +52,8 @@ struct _GstV4l2Compositor
   GstCaps *srccaps;
   GstV4l2CompositorPad *master_cpad;
   gboolean already_negotiated;
-  GHashTable *job_pool;
   int number_of_sinkpads;
+  int alloc_buffers;
 };
 
 struct _GstV4l2CompositorClass
