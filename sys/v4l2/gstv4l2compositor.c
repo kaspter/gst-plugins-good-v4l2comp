@@ -704,35 +704,27 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
 {
   GList *it;
   GList *it2;
-  GHashTableIter it3;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
   GstV4l2CompositorJob *job;
   GstBuffer *external_sink_buf;
 
-  printf ("[Job Pool]\n");
-
-  g_hash_table_iter_init (&it3, self->job_pool);
-  while (g_hash_table_iter_next (&it3, NULL, (gpointer *) & job)) {
-    printf ("  %p mjob=%p pending=%d queued=%d sinkb=%p srcb=%p xsinkb=%p\n",
-        job, job->master_job, job->pending, job->queued,
-        job->sink_buf, job->source_buf, job->external_sink_buf);
-    printf ("                sinkm=%p srcm=%p xsinkm=%p\n",
-        gst_buffer_peek_memory (job->sink_buf, 0),
-        gst_buffer_peek_memory (job->source_buf, 0),
-        gst_buffer_peek_memory (job->external_sink_buf, 0));
-  }
-
-
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     external_sink_buf = pad->buffer;
-    job = g_hash_table_lookup (self->job_pool, external_sink_buf);
 
     printf ("[Pad #%d]\n", cpad->m2m->index);
-    printf ("  external: %p xsinkb=%p\n", job, external_sink_buf);
+    printf ("  numjobs: %d\n", g_list_length (cpad->created_jobs));
+    for (it2 = cpad->created_jobs; it2; it2 = it2->next) {
+      job = it2->data;
+      printf
+          ("  job: %p mjob=%p pending=%d queued=%d sink=%p src=%p xsink=%p\n",
+          job, job->master_job, job->pending, job->queued, job->sink_buf,
+          job->source_buf, job->external_sink_buf);
+    }
 
+    printf ("  external: xsink=%p\n", external_sink_buf);
     printf ("  pending:  [ ");
     for (it2 = cpad->pending_jobs; it2; it2 = it2->next) {
       job = it2->data;
