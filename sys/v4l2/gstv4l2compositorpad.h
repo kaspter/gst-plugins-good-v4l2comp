@@ -64,8 +64,10 @@ struct _GstV4l2CompositorPad
 {
   GstV4l2VideoAggregatorPad parent;
   GstV4l2M2m *m2m;
+  GList *created_jobs;
   GList *pending_jobs;
   GList *queued_jobs;
+  GstBuffer *prev_external_sink_buf;
 
   /* properties */
   gint xpos, ypos;
