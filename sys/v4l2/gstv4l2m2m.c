@@ -66,6 +66,9 @@ gst_v4l2_m2m_new (GstElement * parent, int index)
 
   m2m->streaming = FALSE;
 
+  m2m->sink_min_buffers = -1;
+  m2m->source_min_buffers = -1;
+
   return m2m;
 }
 
@@ -266,30 +269,67 @@ gst_v4l2_m2m_get_source_iomode (GstV4l2M2m * m2m)
 }
 
 
-static const int NBUFS = 16;
+int
+gst_v4l2_m2m_get_min_sink_buffers (GstV4l2M2m * m2m)
+{
+  int ret;
+  struct v4l2_control control;
+  int fd;
+
+  if (m2m->sink_min_buffers >= 0)
+    return m2m->sink_min_buffers;
+
+  control.id = V4L2_CID_MIN_BUFFERS_FOR_OUTPUT;
+  fd = m2m->sink_obj->video_fd;
+  ret = v4l2_ioctl (fd, VIDIOC_G_CTRL, &control);
+  if (ret < 0)
+    return -1;
+  return control.value;
+}
+
+int
+gst_v4l2_m2m_get_min_source_buffers (GstV4l2M2m * m2m)
+{
+  int ret;
+  struct v4l2_control control;
+  int fd;
+
+  if (m2m->source_min_buffers >= 0)
+    return m2m->source_min_buffers;
+
+  control.id = V4L2_CID_MIN_BUFFERS_FOR_CAPTURE;
+  fd = m2m->source_obj->video_fd;
+  ret = v4l2_ioctl (fd, VIDIOC_G_CTRL, &control);
+  if (ret < 0)
+    return -1;
+  return control.value;
+}
 
 gboolean
-gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
-    GstCaps * sink_caps)
+gst_v4l2_m2m_setup (GstV4l2M2m * m2m,
+    GstCaps * source_caps, GstCaps * sink_caps, int nbufs)
 {
   gboolean ok;
   int ret;
   enum v4l2_memory memory;
-  struct v4l2_control control;
-  int sink_nbufs, source_nbufs;
 
-  control.id = V4L2_CID_MIN_BUFFERS_FOR_OUTPUT;
-  ret = v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_G_CTRL, &control);
-  if (ret < 0)
-    return FALSE;
-  sink_nbufs = control.value;
-  sink_nbufs = NBUFS;
-
-  ok = gst_v4l2_object_set_format (m2m->sink_obj, sink_caps);
+  ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, &memory);
   if (!ok)
     return FALSE;
 
   ok = gst_v4l2_object_set_format (m2m->source_obj, source_caps);
+  if (!ok)
+    return FALSE;
+
+  m2m->source_allocator =
+      gst_v4l2_allocator_new (GST_OBJECT (m2m->parent),
+      m2m->source_obj->video_fd, &m2m->source_obj->format);
+
+  ret = gst_v4l2_allocator_start (m2m->source_allocator, nbufs, memory);
+  if (ret < nbufs)
+    return FALSE;
+
+  ok = gst_v4l2_object_set_format (m2m->sink_obj, sink_caps);
   if (!ok)
     return FALSE;
 
@@ -300,26 +340,8 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m, GstCaps * source_caps,
   m2m->sink_allocator =
       gst_v4l2_allocator_new (GST_OBJECT (m2m->parent), m2m->sink_obj->video_fd,
       &m2m->sink_obj->format);
-  ret = gst_v4l2_allocator_start (m2m->sink_allocator, sink_nbufs, memory);
-  if (ret < sink_nbufs)
-    return FALSE;
-
-  control.id = V4L2_CID_MIN_BUFFERS_FOR_CAPTURE;
-  ret = v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_G_CTRL, &control);
-  if (ret < 0)
-    return FALSE;
-  source_nbufs = control.value;
-  source_nbufs = NBUFS;
-
-  ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, &memory);
-  if (!ok)
-    return FALSE;
-
-  m2m->source_allocator =
-      gst_v4l2_allocator_new (GST_OBJECT (m2m->parent),
-      m2m->source_obj->video_fd, &m2m->source_obj->format);
-  ret = gst_v4l2_allocator_start (m2m->source_allocator, source_nbufs, memory);
-  if (ret < source_nbufs)
+  ret = gst_v4l2_allocator_start (m2m->sink_allocator, nbufs, memory);
+  if (ret < nbufs)
     return FALSE;
 
   m2m->dmabuf_allocator = gst_dmabuf_allocator_new ();
