@@ -54,6 +54,7 @@ struct _GstV4l2Compositor
   gboolean already_negotiated;
   int number_of_sinkpads;
   int alloc_buffers;
+  GstClockTime max_delta;
 };
 
 struct _GstV4l2CompositorClass
