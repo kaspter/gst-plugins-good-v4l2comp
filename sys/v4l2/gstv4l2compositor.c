@@ -335,7 +335,7 @@ gst_v4l2_get_number_of_alloc_buffers (GstV4l2Compositor * self)
     nbufs = gst_v4l2_m2m_get_min_source_buffers (cpad->m2m);
     returned_nbufs = MAX (nbufs, returned_nbufs);
   }
-  returned_nbufs = returned_nbufs * 2;
+  returned_nbufs = returned_nbufs + 2;
   self->alloc_buffers = returned_nbufs;
   return returned_nbufs;
 }
