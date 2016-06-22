@@ -832,20 +832,22 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
   GstV4l2CompositorPad *cpad;
   GstV4l2CompositorJob *job;
   GstBuffer *external_sink_buf;
+  GstClockTime delta;
+  int ms;
 
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     external_sink_buf = pad->buffer;
-
     printf ("[Pad #%d]\n", cpad->m2m->index);
     printf ("  numjobs: %d\n", g_list_length (cpad->created_jobs));
     for (it2 = cpad->created_jobs; it2; it2 = it2->next) {
       job = it2->data;
+      ms = GST_TIME_AS_MSECONDS (job->pts);
       printf
-          ("  job: %p mjob=%p pending=%d queued=%d sink=%p src=%p xsink=%p\n",
+          ("  job: %p mjob=%p pending=%d queued=%d sink=%p src=%p pts=%dms\n",
           job, job->master_job, job->pending, job->queued, job->sink_buf,
-          job->source_buf, job->external_sink_buf);
+          job->source_buf, ms);
     }
 
     printf ("  external: xsink=%p\n", external_sink_buf);
@@ -864,8 +866,17 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
     printf ("]\n");
 
   }
+  delta = get_pts_delta_on_pending_jobs (self, NULL);
+  printf ("[common]\n");
+  if (delta == GST_CLOCK_TIME_NONE)
+    printf ("  pts delta = (none)\n");
+  else {
+    ms = GST_TIME_AS_MSECONDS (delta);
+    printf ("  pts delta = %dms\n", ms);
+  }
   printf ("\n");
 }
+
 
 static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
