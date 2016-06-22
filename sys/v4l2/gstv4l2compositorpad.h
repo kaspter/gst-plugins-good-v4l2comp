@@ -41,11 +41,11 @@ struct _GstV4l2CompositorJob
 {
   GstV4l2CompositorJob *master_job;
   GstV4l2CompositorPad *cpad;
-  GstBuffer *external_sink_buf;
   GstBuffer *sink_buf;
   GstBuffer *source_buf;
   gboolean pending;
   gboolean queued;
+  GstClockTime pts;
 };
 
 /**
