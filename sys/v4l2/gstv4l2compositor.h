@@ -53,7 +53,7 @@ struct _GstV4l2Compositor
   GstV4l2CompositorPad *master_cpad;
   gboolean already_negotiated;
   int number_of_sinkpads;
-  int alloc_buffers;
+  int number_of_jobs;
   GstClockTime max_delta;
 };
 

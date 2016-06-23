@@ -156,8 +156,8 @@ gst_v4l2_compositor_pad_init (GstV4l2CompositorPad * cpad)
   cpad->width = DEFAULT_PAD_WIDTH;
   cpad->height = DEFAULT_PAD_HEIGHT;
   cpad->m2m = NULL;
-  cpad->created_jobs = NULL;
-  cpad->pending_jobs = NULL;
+  cpad->jobs = NULL;
+  cpad->prepared_jobs = NULL;
   cpad->queued_jobs = NULL;
   cpad->prev_external_sink_buf = NULL;
 }
@@ -317,28 +317,28 @@ gst_v4l2_compositor_get_master_pad (GstV4l2Compositor * self)
 
 
 static gboolean
-gst_v4l2_get_number_of_alloc_buffers (GstV4l2Compositor * self)
+gst_v4l2_get_number_of_jobs (GstV4l2Compositor * self)
 {
   GList *it;
   GstPad *pad;
   GstV4l2CompositorPad *cpad;
-  int nbufs, returned_nbufs;
+  int njobs, returned_njobs;
 
-  if (self->alloc_buffers > 0)
-    return self->alloc_buffers;
+  if (self->number_of_jobs > 0)
+    return self->number_of_jobs;
 
-  returned_nbufs = 0;
+  returned_njobs = 0;
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    nbufs = gst_v4l2_m2m_get_min_sink_buffers (cpad->m2m);
-    returned_nbufs = MAX (nbufs, returned_nbufs);
-    nbufs = gst_v4l2_m2m_get_min_source_buffers (cpad->m2m);
-    returned_nbufs = MAX (nbufs, returned_nbufs);
+    njobs = gst_v4l2_m2m_get_min_sink_buffers (cpad->m2m);
+    returned_njobs = MAX (njobs, returned_njobs);
+    njobs = gst_v4l2_m2m_get_min_source_buffers (cpad->m2m);
+    returned_njobs = MAX (njobs, returned_njobs);
   }
-  returned_nbufs = returned_nbufs + 2;
-  self->alloc_buffers = returned_nbufs;
-  return returned_nbufs;
+  returned_njobs = returned_njobs + 2;
+  self->number_of_jobs = returned_njobs;
+  return returned_njobs;
 }
 
 
@@ -360,7 +360,7 @@ gst_v4l2_compositor_create_job (GstV4l2CompositorPad * cpad)
   job->source_buf = NULL;
   job->cpad = cpad;
   job->queued = FALSE;
-  job->pending = FALSE;
+  job->prepared = FALSE;
   job->pts = 0;
 
   sink_buf = gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
@@ -393,17 +393,17 @@ gst_v4l2_compositor_cancel_job (GstV4l2CompositorJob * job)
   GstV4l2CompositorPad *cpad;
   gboolean ok;
 
-  if (!job->pending)
+  if (!job->prepared)
     return FALSE;
 
   cpad = job->cpad;
-  job->pending = FALSE;
+  job->prepared = FALSE;
   job->pts = 0;
   ok = gst_v4l2_m2m_reset_buffer (cpad->m2m, job->sink_buf);
   if (!ok)
     return FALSE;
 
-  cpad->pending_jobs = g_list_remove (cpad->pending_jobs, job);
+  cpad->prepared_jobs = g_list_remove (cpad->prepared_jobs, job);
   return TRUE;
 }
 
@@ -417,17 +417,17 @@ gst_v4l2_compositor_lookup_job (GstV4l2Compositor * self,
   gboolean ok;
   int njobs;
 
-  for (it = cpad->created_jobs; it; it = it->next) {
+  for (it = cpad->jobs; it; it = it->next) {
     job = it->data;
-    if ((job->pending) || (job->queued))
+    if ((job->prepared) || (job->queued))
       continue;
 
-    cpad->created_jobs = g_list_delete_link (cpad->created_jobs, it);
-    cpad->created_jobs = g_list_append (cpad->created_jobs, job);
+    cpad->jobs = g_list_delete_link (cpad->jobs, it);
+    cpad->jobs = g_list_append (cpad->jobs, job);
     return job;
   }
 
-  njobs = g_list_length (cpad->pending_jobs);
+  njobs = g_list_length (cpad->prepared_jobs);
   if (njobs == 0)
     return NULL;
 
@@ -436,8 +436,8 @@ gst_v4l2_compositor_lookup_job (GstV4l2Compositor * self,
       cpad->m2m->index);
 
   job = NULL;
-  while (cpad->pending_jobs) {
-    job = cpad->pending_jobs->data;
+  while (cpad->prepared_jobs) {
+    job = cpad->prepared_jobs->data;
     ok = gst_v4l2_compositor_cancel_job (job);
     if (!ok)
       return NULL;
@@ -455,23 +455,23 @@ gst_v4l2_compositor_ensure_jobs (GstV4l2Compositor * self)
   GstV4l2CompositorJob *job;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
-  int i, nbufs;
+  int i, njobs;
 
-  nbufs = gst_v4l2_get_number_of_alloc_buffers (self);
+  njobs = gst_v4l2_get_number_of_jobs (self);
 
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    if (cpad->created_jobs != NULL)
+    if (cpad->jobs != NULL)
       return TRUE;
 
-    for (i = 0; i < nbufs; i++) {
+    for (i = 0; i < njobs; i++) {
       job = gst_v4l2_compositor_create_job (cpad);
       if (job == NULL) {
         GST_ERROR_OBJECT (self, "gst_v4l2_compositor_create_job() failed");
         return FALSE;
       }
-      cpad->created_jobs = g_list_append (cpad->created_jobs, job);
+      cpad->jobs = g_list_append (cpad->jobs, job);
     }
   }
 
@@ -512,8 +512,8 @@ gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
           "gst_v4l2_m2m_import_buffer() failed");
       return FALSE;
     }
-    cpad->pending_jobs = g_list_append (cpad->pending_jobs, job);
-    job->pending = TRUE;
+    cpad->prepared_jobs = g_list_append (cpad->prepared_jobs, job);
+    job->prepared = TRUE;
     job->pts = GST_BUFFER_PTS (external_sink_buf);
     job->queued = FALSE;
   }
@@ -523,7 +523,7 @@ gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
 
 
 static GstClockTime
-get_pts_delta_on_pending_jobs (GstV4l2Compositor * self,
+get_pts_delta_on_prepared_jobs (GstV4l2Compositor * self,
     GstV4l2CompositorJob ** minjob_out)
 {
   GList *it;
@@ -542,7 +542,7 @@ get_pts_delta_on_pending_jobs (GstV4l2Compositor * self,
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    job = g_list_nth_data (cpad->pending_jobs, 0);
+    job = g_list_nth_data (cpad->prepared_jobs, 0);
     if (job == NULL)
       return GST_CLOCK_TIME_NONE;
     if (minjob == NULL)
@@ -565,7 +565,7 @@ get_pts_delta_on_pending_jobs (GstV4l2Compositor * self,
 
 
 static gboolean
-gst_v4l2_compositor_check_jobs (GstV4l2Compositor * self)
+gst_v4l2_compositor_sync_jobs (GstV4l2Compositor * self)
 {
   GstV4l2CompositorJob *job;
   gboolean ok;
@@ -598,7 +598,7 @@ gst_v4l2_compositor_check_jobs (GstV4l2Compositor * self)
   ok = TRUE;
   first_delta = GST_CLOCK_TIME_NONE;
   for (;;) {
-    delta = get_pts_delta_on_pending_jobs (self, &job);
+    delta = get_pts_delta_on_prepared_jobs (self, &job);
     if (first_delta == GST_CLOCK_TIME_NONE)
       first_delta = delta;
     if (delta == GST_CLOCK_TIME_NONE)
@@ -614,7 +614,7 @@ gst_v4l2_compositor_check_jobs (GstV4l2Compositor * self)
   ms = GST_TIME_AS_MSECONDS (first_delta);
   if (njobs)
     GST_WARNING_OBJECT (self,
-        "gst_v4l2_compositor_check_jobs(): cancel %d job(s) (delta=%dms)\n",
+        "gst_v4l2_compositor_sync_jobs(): cancel %d job(s) (delta=%dms)\n",
         njobs, ms);
 
   if (!ok)
@@ -639,11 +639,11 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
   int njobs, nbufs;
 
   master_cpad = gst_v4l2_compositor_get_master_pad (self);
-  master_job = g_list_nth_data (master_cpad->pending_jobs, 0);
+  master_job = g_list_nth_data (master_cpad->prepared_jobs, 0);
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    job = g_list_nth_data (cpad->pending_jobs, 0);
+    job = g_list_nth_data (cpad->prepared_jobs, 0);
     if (job == NULL)
       return TRUE;
     njobs = g_list_length (cpad->queued_jobs);
@@ -656,7 +656,7 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
-    job = g_list_nth_data (cpad->pending_jobs, 0);
+    job = g_list_nth_data (cpad->prepared_jobs, 0);
     if (job->cpad != master_cpad) {
       ok = gst_v4l2_m2m_import_buffer (cpad->m2m, job->source_buf,
           master_job->source_buf);
@@ -686,9 +686,9 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
     }
 
     job->master_job = master_job;
-    job->pending = FALSE;
+    job->prepared = FALSE;
     job->queued = TRUE;
-    cpad->pending_jobs = g_list_remove (cpad->pending_jobs, job);
+    cpad->prepared_jobs = g_list_remove (cpad->prepared_jobs, job);
     cpad->queued_jobs = g_list_append (cpad->queued_jobs, job);
   }
 
@@ -755,7 +755,7 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self, GstBuffer ** outbuf)
     }
 
     job->queued = FALSE;
-    job->pending = FALSE;
+    job->prepared = FALSE;
     job->master_job = NULL;
     cpad->queued_jobs = g_list_remove (cpad->queued_jobs, job);
   }
@@ -775,12 +775,12 @@ gst_v4l2_compositor_cleanup_jobs (GstV4l2Compositor * self)
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    g_list_free (cpad->pending_jobs);
-    cpad->pending_jobs = NULL;
+    g_list_free (cpad->prepared_jobs);
+    cpad->prepared_jobs = NULL;
     g_list_free (cpad->queued_jobs);
     cpad->queued_jobs = NULL;
 
-    for (it2 = cpad->created_jobs; it2; it2 = it2->next) {
+    for (it2 = cpad->jobs; it2; it2 = it2->next) {
       job = it2->data;
       if (job->queued) {
         gst_v4l2_m2m_dqbuf (cpad->m2m, job->source_buf);
@@ -794,7 +794,7 @@ gst_v4l2_compositor_cleanup_jobs (GstV4l2Compositor * self)
       g_free (job);
     }
     g_list_free (cpad->queued_jobs);
-    cpad->created_jobs = NULL;
+    cpad->jobs = NULL;
   }
 }
 
@@ -845,9 +845,9 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     goto failed;
   }
 
-  ok = gst_v4l2_compositor_check_jobs (self);
+  ok = gst_v4l2_compositor_sync_jobs (self);
   if (!ok) {
-    GST_ERROR_OBJECT (self, "gst_v4l2_compositor_check_jobs() failed");
+    GST_ERROR_OBJECT (self, "gst_v4l2_compositor_sync_jobs() failed");
     goto failed;
   }
 
@@ -903,7 +903,7 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   struct v4l2_rect crop_bounds;
   struct v4l2_rect compose_bounds;
   gboolean ok;
-  int nbufs;
+  int njobs;
 
   if (self->already_negotiated)
     return TRUE;
@@ -915,7 +915,7 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   if (!gst_caps_is_fixed (srccaps))
     goto srccaps_not_fixed;
 
-  nbufs = gst_v4l2_get_number_of_alloc_buffers (self);
+  njobs = gst_v4l2_get_number_of_jobs (self);
 
   /** Set format **/
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
@@ -926,7 +926,7 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     if (!gst_caps_is_fixed (sinkcaps))
       goto sinkcaps_not_fixed;
 
-    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, sinkcaps, nbufs))
+    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, sinkcaps, njobs))
       goto setup_failed;
 
     gst_v4l2_compositor_get_crop_bounds (self, cpad, &crop_bounds);
@@ -1245,7 +1245,7 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
 {
   self->videodev = g_strdup (DEFAULT_PROP_DEVICE);
   self->number_of_sinkpads = -1;
-  self->alloc_buffers = -1;
+  self->number_of_jobs = -1;
   self->max_delta = GST_CLOCK_TIME_NONE;
 }
 
