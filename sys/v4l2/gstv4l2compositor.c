@@ -857,19 +857,19 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     external_sink_buf = pad->buffer;
     printf ("[Pad #%d]\n", cpad->m2m->index);
-    printf ("  numjobs: %d\n", g_list_length (cpad->created_jobs));
-    for (it2 = cpad->created_jobs; it2; it2 = it2->next) {
+    printf ("  numjobs: %d\n", g_list_length (cpad->jobs));
+    for (it2 = cpad->jobs; it2; it2 = it2->next) {
       job = it2->data;
       ms = GST_TIME_AS_MSECONDS (job->pts);
       printf
-          ("  job: %p mjob=%p pending=%d queued=%d sink=%p src=%p pts=%dms\n",
-          job, job->master_job, job->pending, job->queued, job->sink_buf,
+          ("  job: %p mjob=%p prepared=%d queued=%d sink=%p src=%p pts=%dms\n",
+          job, job->master_job, job->prepared, job->queued, job->sink_buf,
           job->source_buf, ms);
     }
 
     printf ("  external: xsink=%p\n", external_sink_buf);
-    printf ("  pending:  [ ");
-    for (it2 = cpad->pending_jobs; it2; it2 = it2->next) {
+    printf ("  prepared:  [ ");
+    for (it2 = cpad->prepared_jobs; it2; it2 = it2->next) {
       job = it2->data;
       printf ("%p ", job);
     }
@@ -883,7 +883,7 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
     printf ("]\n");
 
   }
-  delta = get_pts_delta_on_pending_jobs (self, NULL);
+  delta = get_pts_delta_on_prepared_jobs (self, NULL);
   printf ("[common]\n");
   if (delta == GST_CLOCK_TIME_NONE)
     printf ("  pts delta = (none)\n");
