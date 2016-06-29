@@ -894,6 +894,32 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
   printf ("\n");
 }
 
+static int
+gst_v4l2_compositor_get_error_injection ()
+{
+  static const char *path = "/tmp/molo";
+  static int count = 0;
+  FILE *fh;
+  int ch = 0;
+
+  if (count == 0)
+    unlink (path);
+
+  count++;
+  if (count < 50)
+    return 0;
+
+  count = 1;
+  fh = fopen (path, "r");
+  if (!fh)
+    return 0;
+
+  fread (&ch, 1, 1, fh);
+  return ch;
+}
+
+
+
 
 static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
@@ -945,6 +971,16 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   if (outbuf) {
     (*outbuf_p) = outbuf;
     sebgst_trace ("#simple #frame_ok");
+  }
+
+  {
+    int ch = gst_v4l2_compositor_get_error_injection ();
+    switch (ch) {
+      case 'e':
+        goto eos;
+      case 's':
+        goto failed;
+    }
   }
 
   GST_OBJECT_UNLOCK (vagg);
