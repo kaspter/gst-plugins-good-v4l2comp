@@ -555,6 +555,8 @@ get_pts_delta_on_prepared_jobs (GstV4l2Compositor * self,
       maxjob = job;
   }
 
+  if (!minjob || !maxjob)
+    return GST_CLOCK_TIME_NONE;
   if (minjob_out)
     (*minjob_out) = minjob;
 
