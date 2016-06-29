@@ -801,7 +801,7 @@ gst_v4l2_compositor_cleanup_jobs (GstV4l2Compositor * self)
 }
 
 static gboolean
-gst_v4l2_compositor_eos_requested (GstV4l2Compositor * self)
+gst_v4l2_compositor_is_eos (GstV4l2Compositor * self)
 {
   GList *it;
   GstV4l2VideoAggregatorPad *pad;
@@ -823,7 +823,7 @@ static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     GstBuffer ** outbuf_p)
 {
-  gboolean ok, eos;
+  gboolean ok, is_eos;
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
   GstBuffer *outbuf;
 
@@ -831,9 +831,9 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
 
   (*outbuf_p) = NULL;
 
-  eos = gst_v4l2_compositor_eos_requested (self);
-  if (eos)
-    goto eos_requested;
+  is_eos = gst_v4l2_compositor_is_eos (self);
+  if (is_eos)
+    goto eos;
 
   ok = gst_v4l2_compositor_ensure_jobs (self);
   if (!ok) {
@@ -871,7 +871,7 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   GST_OBJECT_UNLOCK (vagg);
   return GST_FLOW_OK;
 
-eos_requested:
+eos:
   gst_v4l2_compositor_cleanup_jobs (self);
   GST_OBJECT_UNLOCK (vagg);
   return GST_FLOW_EOS;
