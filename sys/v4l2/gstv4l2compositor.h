@@ -54,6 +54,7 @@ struct _GstV4l2Compositor
   gboolean already_negotiated;
   int number_of_sinkpads;
   int number_of_jobs;
+  int prop_number_of_jobs;
   GstClockTime max_delta;
 };
 
