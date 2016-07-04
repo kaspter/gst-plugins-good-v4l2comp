@@ -42,8 +42,9 @@ struct _GstV4l2CompositorJob
   GstV4l2CompositorJob *master_job;
   GstV4l2CompositorPad *cpad;
   GstBuffer *sink_buf;
+  GstBuffer *external_sink_buf;
   GstBuffer *source_buf;
-  gboolean pending;
+  gboolean prepared;
   gboolean queued;
   GstClockTime pts;
 };
@@ -57,8 +58,8 @@ struct _GstV4l2CompositorPad
 {
   GstV4l2VideoAggregatorPad parent;
   GstV4l2M2m *m2m;
-  GList *created_jobs;
-  GList *pending_jobs;
+  GList *jobs;
+  GList *prepared_jobs;
   GList *queued_jobs;
   GstBuffer *prev_external_sink_buf;
 
