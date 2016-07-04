@@ -42,6 +42,7 @@ struct _GstV4l2CompositorJob
   GstV4l2CompositorJob *master_job;
   GstV4l2CompositorPad *cpad;
   GstBuffer *sink_buf;
+  GstBuffer *external_sink_buf;
   GstBuffer *source_buf;
   gboolean prepared;
   gboolean queued;
