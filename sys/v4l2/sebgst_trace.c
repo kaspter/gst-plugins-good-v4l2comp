@@ -57,8 +57,10 @@ sebgst_write_ (bool force)
 
   if (filename == NULL) {
     filename = getenv ("SEBGST_TRACE_FILENAME");
-    if (filename == NULL)
+    if (filename == NULL) {
       written = true;
+      return;
+    }
   }
 
   if (!force) {
