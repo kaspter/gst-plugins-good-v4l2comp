@@ -201,10 +201,12 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
 
 /* GstV4l2Compositor */
 #define DEFAULT_PROP_DEVICE   "/dev/video0"
+#define DEFAULT_PROP_NUMJOBS  0
 enum
 {
   PROP_0,
   PROP_DEVICE,
+  PROP_NUMJOBS,
 };
 
 static void
@@ -216,6 +218,9 @@ gst_v4l2_compositor_get_property (GObject * object,
   switch (prop_id) {
     case PROP_DEVICE:
       g_value_set_string (value, self->videodev);
+      break;
+    case PROP_NUMJOBS:
+      g_value_set_int (value, self->prop_number_of_jobs);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -250,6 +255,9 @@ gst_v4l2_compositor_set_property (GObject * object,
     case PROP_DEVICE:
       g_free (self->videodev);
       self->videodev = g_value_dup_string (value);
+      break;
+    case PROP_NUMJOBS:
+      self->prop_number_of_jobs = g_value_get_int (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -327,16 +335,22 @@ gst_v4l2_get_number_of_jobs (GstV4l2Compositor * self)
   if (self->number_of_jobs > 0)
     return self->number_of_jobs;
 
-  returned_njobs = 0;
-  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
-    pad = it->data;
-    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    njobs = gst_v4l2_m2m_get_min_sink_buffers (cpad->m2m);
-    returned_njobs = MAX (njobs, returned_njobs);
-    njobs = gst_v4l2_m2m_get_min_source_buffers (cpad->m2m);
-    returned_njobs = MAX (njobs, returned_njobs);
+  if (self->prop_number_of_jobs > 0)
+    returned_njobs = self->prop_number_of_jobs;
+
+  else {
+    returned_njobs = 0;
+    for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
+      pad = it->data;
+      cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+      njobs = gst_v4l2_m2m_get_min_sink_buffers (cpad->m2m);
+      returned_njobs = MAX (njobs, returned_njobs);
+      njobs = gst_v4l2_m2m_get_min_source_buffers (cpad->m2m);
+      returned_njobs = MAX (njobs, returned_njobs);
+    }
+    returned_njobs = returned_njobs + 2;
   }
-  returned_njobs = returned_njobs + 2;
+
   self->number_of_jobs = returned_njobs;
   return returned_njobs;
 }
@@ -1309,4 +1323,8 @@ gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class)
   g_object_class_install_property (gobject_class, PROP_DEVICE,
       g_param_spec_string ("device", "Device", "Device location",
           NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_NUMJOBS,
+      g_param_spec_int ("num_jobs", "num_jobs", "num_jobs",
+          0, G_MAXINT, DEFAULT_PROP_NUMJOBS, G_PARAM_READWRITE));
 }
