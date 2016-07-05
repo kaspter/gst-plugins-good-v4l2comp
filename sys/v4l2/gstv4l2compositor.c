@@ -159,7 +159,6 @@ gst_v4l2_compositor_pad_init (GstV4l2CompositorPad * cpad)
   cpad->jobs = NULL;
   cpad->prepared_jobs = NULL;
   cpad->queued_jobs = NULL;
-  cpad->prev_external_sink_buf = NULL;
 }
 
 static void
@@ -376,7 +375,6 @@ gst_v4l2_compositor_create_job (GstV4l2CompositorPad * cpad)
   job->cpad = cpad;
   job->queued = FALSE;
   job->prepared = FALSE;
-  job->pts = 0;
 
   sink_buf = gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
   if (sink_buf == NULL)
@@ -412,7 +410,6 @@ gst_v4l2_compositor_cancel_job (GstV4l2CompositorJob * job)
 
   cpad = job->cpad;
   job->prepared = FALSE;
-  job->pts = 0;
   cpad->prepared_jobs = g_list_remove (cpad->prepared_jobs, job);
 
   return TRUE;
@@ -500,134 +497,21 @@ gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     external_sink_buf = pad->buffer;
-    if (external_sink_buf == NULL)
-      continue;
-    if (cpad->prev_external_sink_buf == external_sink_buf)
-      continue;
 
     job = gst_v4l2_compositor_lookup_job (self, cpad);
     if (job == NULL) {
       GST_WARNING_OBJECT (self, "gst_v4l2_compositor_lookup_job() failed");
-      continue;
+      return FALSE;
     }
-
-    cpad->prev_external_sink_buf = external_sink_buf;
     cpad->prepared_jobs = g_list_append (cpad->prepared_jobs, job);
     job->external_sink_buf = external_sink_buf;
+    if (job->external_sink_buf)
+      gst_buffer_ref (job->external_sink_buf);
     job->prepared = TRUE;
-    job->pts = GST_BUFFER_PTS (external_sink_buf);
-    job->queued = FALSE;
   }
 
   return TRUE;
 }
-
-
-static GstClockTime
-get_pts_delta_on_prepared_jobs (GstV4l2Compositor * self,
-    GstV4l2CompositorJob ** minjob_out)
-{
-  GList *it;
-  GstV4l2VideoAggregatorPad *pad;
-  GstV4l2CompositorPad *cpad;
-  GstV4l2CompositorJob *job;
-  GstV4l2CompositorJob *minjob;
-  GstV4l2CompositorJob *maxjob;
-  GstClockTime delta;
-
-  minjob = NULL;
-  maxjob = NULL;
-  if (minjob_out)
-    (*minjob_out) = NULL;
-
-  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
-    pad = it->data;
-    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    job = g_list_nth_data (cpad->prepared_jobs, 0);
-    if (job == NULL)
-      return GST_CLOCK_TIME_NONE;
-    if (minjob == NULL)
-      minjob = job;
-    else if (job->pts < minjob->pts)
-      minjob = job;
-    if (maxjob == NULL)
-      maxjob = job;
-    else if (job->pts > maxjob->pts)
-      maxjob = job;
-  }
-
-  if (!minjob || !maxjob)
-    return GST_CLOCK_TIME_NONE;
-  if (minjob_out)
-    (*minjob_out) = minjob;
-
-  delta = maxjob->pts - minjob->pts;
-  return delta;
-}
-
-
-
-static gboolean
-gst_v4l2_compositor_sync_jobs (GstV4l2Compositor * self)
-{
-  GstV4l2CompositorJob *job;
-  gboolean ok;
-  GstClockTime delta;
-  GstClockTime first_delta;
-  GstClockTime duration;
-  int njobs;
-  GList *it;
-  GstV4l2VideoAggregatorPad *pad;
-  GstBuffer *external_sink_buf;
-  int ms;
-
-  if (self->max_delta == GST_CLOCK_TIME_NONE) {
-    for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
-      pad = it->data;
-      external_sink_buf = pad->buffer;
-      if (!external_sink_buf)
-        continue;
-      duration = GST_BUFFER_DURATION (external_sink_buf);
-      if (duration == GST_CLOCK_TIME_NONE)
-        continue;
-      self->max_delta = duration;
-      break;
-    }
-    if (self->max_delta == GST_CLOCK_TIME_NONE)
-      return TRUE;
-  }
-
-  njobs = 0;
-  ok = TRUE;
-  first_delta = GST_CLOCK_TIME_NONE;
-  for (;;) {
-    delta = get_pts_delta_on_prepared_jobs (self, &job);
-    if (first_delta == GST_CLOCK_TIME_NONE)
-      first_delta = delta;
-    if (delta == GST_CLOCK_TIME_NONE)
-      break;
-    if (delta < self->max_delta)
-      break;
-    njobs++;
-    ok = gst_v4l2_compositor_cancel_job (job);
-    if (!ok)
-      break;
-  }
-
-  ms = GST_TIME_AS_MSECONDS (first_delta);
-  if (njobs) {
-    GST_WARNING_OBJECT (self,
-        "gst_v4l2_compositor_sync_jobs(): cancel %d job(s) (delta=%dms)\n",
-        njobs, ms);
-  }
-
-  if (!ok)
-    return FALSE;
-
-  return TRUE;
-}
-
-
 
 
 static gboolean
@@ -661,41 +545,42 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
     job = g_list_nth_data (cpad->prepared_jobs, 0);
-    if (job->cpad != master_cpad) {
-      ok = gst_v4l2_m2m_import_buffer (cpad->m2m, job->source_buf,
-          master_job->source_buf);
+    if (job->external_sink_buf) {
+      if (job->cpad != master_cpad) {
+        ok = gst_v4l2_m2m_import_buffer (cpad->m2m, job->source_buf,
+            master_job->source_buf);
+        if (!ok) {
+          GST_ERROR_OBJECT (cpad->m2m->parent,
+              "gst_v4l2_m2m_import_buffer() failed");
+          return FALSE;
+        }
+      }
+
+      ok = gst_v4l2_m2m_import_buffer (cpad->m2m, job->sink_buf,
+          job->external_sink_buf);
       if (!ok) {
         GST_ERROR_OBJECT (cpad->m2m->parent,
             "gst_v4l2_m2m_import_buffer() failed");
         return FALSE;
       }
-    }
 
-    ok = gst_v4l2_m2m_import_buffer (cpad->m2m, job->sink_buf,
-        job->external_sink_buf);
-    if (!ok) {
-      GST_ERROR_OBJECT (cpad->m2m->parent,
-          "gst_v4l2_m2m_import_buffer() failed");
-      return FALSE;
-    }
-    gst_buffer_ref (job->external_sink_buf);
+      ok = gst_v4l2_m2m_qbuf (cpad->m2m, job->sink_buf);
+      if (!ok) {
+        GST_ERROR_OBJECT (self, "gst_v4l2_m2m_qbuf() failed");
+        return FALSE;
+      }
 
-    ok = gst_v4l2_m2m_qbuf (cpad->m2m, job->sink_buf);
-    if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_qbuf() failed");
-      return FALSE;
-    }
+      ok = gst_v4l2_m2m_qbuf (cpad->m2m, job->source_buf);
+      if (!ok) {
+        GST_ERROR_OBJECT (self, "gst_v4l2_m2m_qbuf() failed");
+        return FALSE;
+      }
 
-    ok = gst_v4l2_m2m_qbuf (cpad->m2m, job->source_buf);
-    if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_qbuf() failed");
-      return FALSE;
-    }
-
-    ok = gst_v4l2_m2m_require_streamon (cpad->m2m);
-    if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_require_streamon() failed");
-      return FALSE;
+      ok = gst_v4l2_m2m_require_streamon (cpad->m2m);
+      if (!ok) {
+        GST_ERROR_OBJECT (self, "gst_v4l2_m2m_require_streamon() failed");
+        return FALSE;
+      }
     }
 
     job->master_job = master_job;
@@ -743,37 +628,40 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self, GstBuffer ** outbuf)
       gst_buffer_ref ((*outbuf));
     }
 
-    ok = gst_v4l2_m2m_dqbuf (job->cpad->m2m, job->sink_buf);
-    if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_dqbuf() failed");
-      return FALSE;
-    }
+    if (job->external_sink_buf) {
+      ok = gst_v4l2_m2m_dqbuf (job->cpad->m2m, job->sink_buf);
+      if (!ok) {
+        GST_ERROR_OBJECT (self, "gst_v4l2_m2m_dqbuf() failed");
+        return FALSE;
+      }
 
-    ok = gst_v4l2_m2m_dqbuf (job->cpad->m2m, job->source_buf);
-    if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_dqbuf() failed");
-      return FALSE;
-    }
+      ok = gst_v4l2_m2m_dqbuf (job->cpad->m2m, job->source_buf);
+      if (!ok) {
+        GST_ERROR_OBJECT (self, "gst_v4l2_m2m_dqbuf() failed");
+        return FALSE;
+      }
 
-    if (job->cpad != master_cpad) {
-      ok = gst_v4l2_m2m_reset_buffer (job->cpad->m2m, job->source_buf);
+      if (job->cpad != master_cpad) {
+        ok = gst_v4l2_m2m_reset_buffer (job->cpad->m2m, job->source_buf);
+        if (!ok) {
+          GST_ERROR_OBJECT (self, "gst_v4l2_m2m_reset_buffer() failed");
+          return FALSE;
+        }
+      }
+
+      ok = gst_v4l2_m2m_reset_buffer (job->cpad->m2m, job->sink_buf);
       if (!ok) {
         GST_ERROR_OBJECT (self, "gst_v4l2_m2m_reset_buffer() failed");
         return FALSE;
       }
-    }
 
-    ok = gst_v4l2_m2m_reset_buffer (job->cpad->m2m, job->sink_buf);
-    if (!ok) {
-      GST_ERROR_OBJECT (self, "gst_v4l2_m2m_reset_buffer() failed");
-      return FALSE;
+      gst_buffer_unref (job->external_sink_buf);
+      job->external_sink_buf = NULL;
     }
-    gst_buffer_unref (job->external_sink_buf);
 
     job->queued = FALSE;
     job->prepared = FALSE;
     job->master_job = NULL;
-    job->external_sink_buf = NULL;
     cpad->queued_jobs = g_list_remove (cpad->queued_jobs, job);
   }
 
@@ -808,6 +696,8 @@ gst_v4l2_compositor_cleanup_jobs (GstV4l2Compositor * self)
         gst_buffer_unref (job->source_buf);
       if (job->sink_buf)
         gst_buffer_unref (job->sink_buf);
+      if (job->external_sink_buf)
+        gst_buffer_unref (job->external_sink_buf);
       g_free (job);
     }
     g_list_free (cpad->queued_jobs);
@@ -859,12 +749,6 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   ok = gst_v4l2_compositor_prepare_jobs (self);
   if (!ok) {
     GST_ERROR_OBJECT (self, "gst_v4l2_compositor_prepare_jobs() failed");
-    goto failed;
-  }
-
-  ok = gst_v4l2_compositor_sync_jobs (self);
-  if (!ok) {
-    GST_ERROR_OBJECT (self, "gst_v4l2_compositor_sync_jobs() failed");
     goto failed;
   }
 
@@ -1264,7 +1148,7 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->number_of_sinkpads = -1;
   self->number_of_jobs = 0;
   self->prop_number_of_jobs = DEFAULT_PROP_NUMJOBS;
-  self->max_delta = GST_CLOCK_TIME_NONE;
+
 }
 
 /* GObject boilerplate */

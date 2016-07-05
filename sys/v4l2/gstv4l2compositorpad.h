@@ -46,7 +46,6 @@ struct _GstV4l2CompositorJob
   GstBuffer *source_buf;
   gboolean prepared;
   gboolean queued;
-  GstClockTime pts;
 };
 
 /**
@@ -61,7 +60,6 @@ struct _GstV4l2CompositorPad
   GList *jobs;
   GList *prepared_jobs;
   GList *queued_jobs;
-  GstBuffer *prev_external_sink_buf;
 
   /* properties */
   gint xpos, ypos;
