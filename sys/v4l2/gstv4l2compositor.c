@@ -860,11 +860,10 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
     printf ("  numjobs: %d\n", g_list_length (cpad->jobs));
     for (it2 = cpad->jobs; it2; it2 = it2->next) {
       job = it2->data;
-      ms = GST_TIME_AS_MSECONDS (job->pts);
       printf
-          ("  job: %p mjob=%p prepared=%d queued=%d sink=%p src=%p pts=%dms\n",
-          job, job->master_job, job->prepared, job->queued, job->sink_buf,
-          job->source_buf, ms);
+          ("  job: %p mjob=%p prepared=%d queued=%d xsink=%p sink=%p src=%p\n",
+          job, job->master_job, job->prepared, job->queued,
+          job->external_sink_buf, job->sink_buf, job->source_buf);
     }
 
     printf ("  external: xsink=%p\n", external_sink_buf);
@@ -883,14 +882,7 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
     printf ("]\n");
 
   }
-  delta = get_pts_delta_on_prepared_jobs (self, NULL);
   printf ("[common]\n");
-  if (delta == GST_CLOCK_TIME_NONE)
-    printf ("  pts delta = (none)\n");
-  else {
-    ms = GST_TIME_AS_MSECONDS (delta);
-    printf ("  pts delta = %dms\n", ms);
-  }
   printf ("\n");
 }
 
