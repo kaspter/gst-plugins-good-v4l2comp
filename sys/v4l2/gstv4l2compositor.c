@@ -887,7 +887,7 @@ gst_v4l2_compositor_dump_jobs (GstV4l2Compositor * self)
 }
 
 static int
-gst_v4l2_compositor_get_error_injection ()
+gst_v4l2_compositor_get_error_injection (void)
 {
   static const char *path = "/tmp/molo";
   static int count = 0;
