@@ -350,24 +350,8 @@ gst_v4l2_video_enc_finish (GstVideoEncoder * encoder)
    * _pool_process() will return FLUSHING when that happened */
   GST_VIDEO_ENCODER_STREAM_UNLOCK (encoder);
 
-  if (gst_v4l2_encoder_cmd (self->v4l2output, V4L2_ENC_CMD_STOP, 0)) {
-    /* If the encoder stop command succeeded, just wait until processing is
-     * finished */
-    GST_OBJECT_LOCK (encoder->srcpad->task);
-    GST_TASK_WAIT (encoder->srcpad->task);
-    GST_OBJECT_UNLOCK (encoder->srcpad->task);
-    ret = GST_FLOW_FLUSHING;
-  } else {
-    /* otherwise keep queuing empty buffers until the processing thread has
-     * stopped, _pool_process() will return FLUSHING when that happened */
-    while (ret == GST_FLOW_OK) {
-      buffer = gst_buffer_new ();
-      ret =
-          gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (self->v4l2output->
-              pool), &buffer);
-      gst_buffer_unref (buffer);
-    }
-  }
+  gst_v4l2_encoder_cmd (self->v4l2output, V4L2_ENC_CMD_STOP, 0);
+  ret = GST_FLOW_FLUSHING;
 
   /* and ensure the processing thread has stopped in case another error
    * occured. */
