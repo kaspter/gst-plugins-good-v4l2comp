@@ -700,7 +700,7 @@ gst_v4l2_compositor_cleanup_jobs (GstV4l2Compositor * self)
         gst_buffer_unref (job->external_sink_buf);
       g_free (job);
     }
-    g_list_free (cpad->queued_jobs);
+    g_list_free (cpad->jobs);
     cpad->jobs = NULL;
   }
 }
@@ -983,6 +983,9 @@ gst_v4l2_compositor_close (GstV4l2Compositor * self)
   GST_DEBUG_OBJECT (self, "Closing");
 
   GST_OBJECT_LOCK (self);
+
+  gst_v4l2_compositor_cleanup_jobs (self);
+
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
@@ -1148,7 +1151,6 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->number_of_sinkpads = -1;
   self->number_of_jobs = 0;
   self->prop_number_of_jobs = DEFAULT_PROP_NUMJOBS;
-
 }
 
 /* GObject boilerplate */
