@@ -422,31 +422,15 @@ gst_v4l2_compositor_lookup_job (GstV4l2Compositor * self,
 {
   GList *it;
   GstV4l2CompositorJob *job;
-  int refcount;
-  int refcount_failed;
 
-  refcount_failed = 0;
   for (it = cpad->jobs; it; it = it->next) {
     job = it->data;
     if ((job->prepared) || (job->queued))
       continue;
 
-    refcount =
-        GST_MINI_OBJECT_REFCOUNT_VALUE (GST_MINI_OBJECT_CAST (job->source_buf));
-    if (refcount > 1) {
-      refcount_failed++;
-      continue;
-    }
-
     cpad->jobs = g_list_delete_link (cpad->jobs, it);
     cpad->jobs = g_list_append (cpad->jobs, job);
     return job;
-  }
-
-  if (refcount_failed > 0) {
-    GST_WARNING_OBJECT (self,
-        "gst_v4l2_compositor_lookup_job(): refcount check failed %d time(s)\n",
-        refcount_failed);
   }
 
   return NULL;
