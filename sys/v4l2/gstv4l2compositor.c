@@ -984,8 +984,6 @@ gst_v4l2_compositor_close (GstV4l2Compositor * self)
 
   GST_OBJECT_LOCK (self);
 
-  gst_v4l2_compositor_cleanup_jobs (self);
-
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
@@ -1005,6 +1003,8 @@ gst_v4l2_compositor_stop (GstV4l2Aggregator * agg)
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (agg);
 
   GST_DEBUG_OBJECT (self, "Stop");
+
+  gst_v4l2_compositor_cleanup_jobs (self);
 
   GST_OBJECT_LOCK (self);
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
