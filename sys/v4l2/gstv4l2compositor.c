@@ -322,7 +322,6 @@ gst_v4l2_compositor_get_master_pad (GstV4l2Compositor * self)
   return NULL;
 }
 
-
 static gboolean
 gst_v4l2_get_number_of_jobs (GstV4l2Compositor * self)
 {
@@ -354,7 +353,6 @@ gst_v4l2_get_number_of_jobs (GstV4l2Compositor * self)
   return returned_njobs;
 }
 
-
 static GstV4l2CompositorJob *
 gst_v4l2_compositor_create_job (GstV4l2CompositorPad * cpad)
 {
@@ -373,8 +371,7 @@ gst_v4l2_compositor_create_job (GstV4l2CompositorPad * cpad)
   job->source_buf = NULL;
   job->external_sink_buf = NULL;
   job->cpad = cpad;
-  job->queued = FALSE;
-  job->prepared = FALSE;
+  job->state = 'R';
 
   sink_buf = gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
   if (sink_buf == NULL)
@@ -400,6 +397,7 @@ failed:
   return NULL;
 }
 
+#if 0
 static gboolean
 gst_v4l2_compositor_cancel_job (GstV4l2CompositorJob * job)
 {
@@ -414,7 +412,7 @@ gst_v4l2_compositor_cancel_job (GstV4l2CompositorJob * job)
 
   return TRUE;
 }
-
+#endif
 
 static GstV4l2CompositorJob *
 gst_v4l2_compositor_lookup_job (GstV4l2Compositor * self,
@@ -422,10 +420,26 @@ gst_v4l2_compositor_lookup_job (GstV4l2Compositor * self,
 {
   GList *it;
   GstV4l2CompositorJob *job;
+  GstBuffer *source_buf;
 
   for (it = cpad->jobs; it; it = it->next) {
     job = it->data;
-    if ((job->prepared) || (job->queued))
+    if (job->state != 'D')
+      continue;
+
+    source_buf =
+        gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SOURCE);
+    if (source_buf == NULL)
+      return NULL;
+
+    job->source_buf = source_buf;
+    job->state = 'R';
+    break;
+  }
+
+  for (it = cpad->jobs; it; it = it->next) {
+    job = it->data;
+    if (job->state != 'R')
       continue;
 
     cpad->jobs = g_list_delete_link (cpad->jobs, it);
@@ -435,8 +449,6 @@ gst_v4l2_compositor_lookup_job (GstV4l2Compositor * self,
 
   return NULL;
 }
-
-
 
 static gboolean
 gst_v4l2_compositor_ensure_jobs (GstV4l2Compositor * self)
@@ -491,12 +503,11 @@ gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
     job->external_sink_buf = external_sink_buf;
     if (job->external_sink_buf)
       gst_buffer_ref (job->external_sink_buf);
-    job->prepared = TRUE;
+    job->state = 'P';
   }
 
   return TRUE;
 }
-
 
 static gboolean
 gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
@@ -568,8 +579,7 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
     }
 
     job->master_job = master_job;
-    job->prepared = FALSE;
-    job->queued = TRUE;
+    job->state = 'Q';
     cpad->prepared_jobs = g_list_remove (cpad->prepared_jobs, job);
     cpad->queued_jobs = g_list_append (cpad->queued_jobs, job);
   }
@@ -577,9 +587,19 @@ gst_v4l2_compositor_queue_jobs (GstV4l2Compositor * self)
   return TRUE;
 }
 
+static void
+gst_v4l2_on_output_buffer_finalization (gpointer outjob_p,
+    GstMiniObject * buf_p)
+{
+  GstV4l2CompositorJob *outjob = (GstV4l2CompositorJob *) outjob_p;
+  //  GstBuffer *buf = (GstBuffer *) buf_p;
+
+  outjob->state = 'D';
+}
 
 static gboolean
-gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self, GstBuffer ** outbuf)
+gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self,
+    GstV4l2CompositorJob ** outjob)
 {
   GList *it;
   GstV4l2CompositorPad *master_cpad;
@@ -589,7 +609,7 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self, GstBuffer ** outbuf)
   GstV4l2CompositorPad *cpad;
   int njobs, nbufs;
 
-  (*outbuf) = NULL;
+  (*outjob) = NULL;
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
@@ -607,10 +627,8 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self, GstBuffer ** outbuf)
 
     job = g_list_nth_data (cpad->queued_jobs, 0);
 
-    if (job->cpad == master_cpad) {
-      (*outbuf) = job->source_buf;
-      gst_buffer_ref ((*outbuf));
-    }
+    if (job->cpad == master_cpad)
+      (*outjob) = job;
 
     if (job->external_sink_buf) {
       ok = gst_v4l2_m2m_dqbuf (job->cpad->m2m, job->sink_buf);
@@ -643,8 +661,6 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self, GstBuffer ** outbuf)
       job->external_sink_buf = NULL;
     }
 
-    job->queued = FALSE;
-    job->prepared = FALSE;
     job->master_job = NULL;
     cpad->queued_jobs = g_list_remove (cpad->queued_jobs, job);
   }
@@ -671,10 +687,10 @@ gst_v4l2_compositor_cleanup_jobs (GstV4l2Compositor * self)
 
     for (it2 = cpad->jobs; it2; it2 = it2->next) {
       job = it2->data;
-      if (job->queued) {
+      if (job->state == 'Q') {
         gst_v4l2_m2m_dqbuf (cpad->m2m, job->source_buf);
         gst_v4l2_m2m_dqbuf (cpad->m2m, job->sink_buf);
-        job->queued = FALSE;
+        job->state = 'R';
       }
       if (job->source_buf)
         gst_buffer_unref (job->source_buf);
@@ -710,15 +726,15 @@ gst_v4l2_compositor_is_eos (GstV4l2Compositor * self)
 
 static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
-    GstBuffer ** outbuf_p)
+    GstBuffer ** outbuf)
 {
   gboolean ok, is_eos;
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
-  GstBuffer *outbuf;
+  GstV4l2CompositorJob *outjob;
 
   GST_OBJECT_LOCK (vagg);
 
-  (*outbuf_p) = NULL;
+  (*outbuf) = NULL;
 
   is_eos = gst_v4l2_compositor_is_eos (self);
   if (is_eos)
@@ -742,13 +758,18 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     goto failed;
   }
 
-  ok = gst_v4l2_compositor_dequeue_jobs (self, &outbuf);
+  ok = gst_v4l2_compositor_dequeue_jobs (self, &outjob);
   if (!ok) {
     GST_ERROR_OBJECT (self, "gst_v4l2_compositor_dequeue_jobs() failed");
     goto failed;
   }
-  if (outbuf) {
-    (*outbuf_p) = outbuf;
+
+  if (outjob) {
+    (*outbuf) = outjob->source_buf;
+    outjob->state = 'G';
+    gst_mini_object_weak_ref ((GstMiniObject *) outjob->source_buf,
+        gst_v4l2_on_output_buffer_finalization, (gpointer) outjob);
+    outjob->source_buf = NULL;
   }
 
   GST_OBJECT_UNLOCK (vagg);

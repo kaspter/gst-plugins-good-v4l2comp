@@ -44,8 +44,7 @@ struct _GstV4l2CompositorJob
   GstBuffer *sink_buf;
   GstBuffer *external_sink_buf;
   GstBuffer *source_buf;
-  gboolean prepared;
-  gboolean queued;
+  char state;
 };
 
 /**
