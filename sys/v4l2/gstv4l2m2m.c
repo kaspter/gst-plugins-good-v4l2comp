@@ -382,15 +382,6 @@ gst_v4l2_m2m_reset_buffer (GstV4l2M2m * m2m, GstBuffer * buf)
   return TRUE;
 }
 
-static void
-on_buffer_finalization (gpointer m2m_p, GstMiniObject * buf_p)
-{
-  GstV4l2M2m *m2m = (GstV4l2M2m *) m2m_p;
-  GstBuffer *buf = (GstBuffer *) buf_p;
-
-  gst_v4l2_m2m_reset_buffer (m2m, buf);
-}
-
 gboolean
 gst_v4l2_m2m_set_background (GstV4l2M2m * m2m, unsigned int background)
 {
@@ -468,9 +459,6 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
 
   mem = group->mem[0];
   gst_buffer_append_memory (buf, mem);
-
-  gst_mini_object_weak_ref ((GstMiniObject *) buf, on_buffer_finalization,
-      (gpointer) m2m);
 
   return buf;
 }
