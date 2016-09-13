@@ -1131,7 +1131,10 @@ gst_v4l2_compositor_dispose (GObject * object)
     GST_DEBUG_OBJECT (self, "calling destroy");
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    gst_v4l2_m2m_destroy (cpad->m2m);
+    if (cpad->m2m) {
+      gst_v4l2_m2m_destroy (cpad->m2m);
+      cpad->m2m = NULL;
+    }
   }
 
   gst_caps_replace (&self->srccaps, NULL);
