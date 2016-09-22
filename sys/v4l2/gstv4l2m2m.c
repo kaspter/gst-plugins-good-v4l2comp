@@ -423,6 +423,23 @@ gst_v4l2_m2m_set_selection (GstV4l2M2m * m2m, struct v4l2_rect * crop_bounds,
   return TRUE;
 }
 
+
+static gboolean
+gst_v4l2_m2m_dispose_buffer (GstBuffer * buffer)
+{
+  gboolean do_free;
+  GstV4l2M2mMeta *emeta;
+
+  emeta = gst_v4l2_m2m_get_meta (buffer);
+
+  if (emeta->dispose)
+    do_free = emeta->dispose (buffer, emeta->user_data);
+  else
+    do_free = TRUE;
+  return do_free;
+}
+
+
 GstBuffer *
 gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
 {
@@ -431,10 +448,19 @@ gst_v4l2_m2m_alloc_buffer (GstV4l2M2m * m2m, enum GstV4l2M2mBufferType buf_type)
   GstV4l2IOMode mode;
   GstBuffer *buf;
   GstMemory *mem;
+  GstV4l2M2mMeta *emeta;
 
   buf = gst_buffer_new ();
   if (!buf)
     return NULL;
+
+  emeta = gst_v4l2_m2m_meta_add (buf);
+  if (emeta == NULL)
+    return NULL;
+
+  emeta->instance = m2m;
+  buf->mini_object.dispose =
+      (GstMiniObjectDisposeFunction) gst_v4l2_m2m_dispose_buffer;
 
   allocator = get_allocator_from_buftype (m2m, buf_type);
   if (!allocator)
@@ -636,4 +662,82 @@ gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
     gst_v4l2_allocator_flush (m2m->source_allocator);
     gst_v4l2_allocator_stop (m2m->source_allocator);
   }
+}
+
+GType
+gst_v4l2_m2m_meta_api_get_type (void)
+{
+  static volatile GType type;
+  static const gchar *tags[] = { NULL };
+
+  if (g_once_init_enter (&type)) {
+    GType _type = gst_meta_api_type_register ("GstV4l2M2mMetaAPI", tags);
+    g_once_init_leave (&type, _type);
+  }
+  return type;
+}
+
+static gboolean
+gst_v4l2_m2m_meta_init (GstMeta * meta, gpointer params, GstBuffer * buffer)
+{
+  GstV4l2M2mMeta *emeta = (GstV4l2M2mMeta *) meta;
+
+  emeta->instance = NULL;
+  emeta->dispose = NULL;
+  emeta->user_data = NULL;
+
+  return TRUE;
+}
+
+static gboolean
+gst_v4l2_m2m_meta_transform (GstBuffer * transbuf, GstMeta * meta,
+    GstBuffer * buffer, GQuark type, gpointer data)
+{
+  /* M2M meta is not propagated on transform */
+
+  return TRUE;
+}
+
+static void
+gst_v4l2_m2m_meta_free (GstMeta * meta, GstBuffer * buffer)
+{
+  GstV4l2M2mMeta *emeta = (GstV4l2M2mMeta *) meta;
+
+  emeta->instance = NULL;
+  emeta->dispose = NULL;
+  emeta->user_data = NULL;
+}
+
+const GstMetaInfo *
+gst_v4l2_m2m_meta_get_info (void)
+{
+  static const GstMetaInfo *meta_info = NULL;
+
+  if (g_once_init_enter (&meta_info)) {
+    const GstMetaInfo *mi = gst_meta_register (GST_V4L2_M2M_META_API_TYPE,
+        "GstV4l2M2mMeta",
+        sizeof (GstV4l2M2mMeta),
+        gst_v4l2_m2m_meta_init,
+        gst_v4l2_m2m_meta_free,
+        gst_v4l2_m2m_meta_transform);
+    g_once_init_leave (&meta_info, mi);
+  }
+  return meta_info;
+}
+
+GstV4l2M2mMeta *
+gst_v4l2_m2m_meta_add (GstBuffer * buffer)
+{
+  GstV4l2M2mMeta *emeta;
+
+  g_return_val_if_fail (GST_IS_BUFFER (buffer), NULL);
+
+  emeta = (GstV4l2M2mMeta *) gst_buffer_add_meta (buffer,
+      GST_V4L2_M2M_META_INFO, NULL);
+
+  emeta->instance = NULL;
+  emeta->dispose = NULL;
+  emeta->user_data = NULL;
+
+  return emeta;
 }
