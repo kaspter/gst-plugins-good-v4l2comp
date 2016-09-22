@@ -52,6 +52,7 @@ struct _GstV4l2Compositor
   GstCaps *srccaps;
   GstV4l2CompositorPad *master_cpad;
   gboolean already_negotiated;
+  gboolean cleanup_jobs;
   int number_of_sinkpads;
   int number_of_jobs;
   int prop_number_of_jobs;
