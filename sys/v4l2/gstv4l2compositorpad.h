@@ -37,8 +37,12 @@ typedef struct _GstV4l2CompositorPad GstV4l2CompositorPad;
 typedef struct _GstV4l2CompositorPadClass GstV4l2CompositorPadClass;
 typedef struct _GstV4l2CompositorJob GstV4l2CompositorJob;
 
+struct _GstV4l2Compositor;
+typedef struct _GstV4l2Compositor GstV4l2Compositor;
+
 struct _GstV4l2CompositorJob
 {
+  GstV4l2Compositor *parent;
   GstV4l2CompositorJob *master_job;
   GstV4l2CompositorPad *cpad;
   GstBuffer *sink_buf;
