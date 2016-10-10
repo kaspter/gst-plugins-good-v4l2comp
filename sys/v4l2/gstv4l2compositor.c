@@ -866,6 +866,14 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
     sinkcaps = gst_pad_get_current_caps (pad);
+    if (sinkcaps == NULL)
+      goto sinkcaps_not_ready;
+  }
+
+  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
+    pad = it->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+
     if (!gst_caps_is_fixed (sinkcaps))
       goto sinkcaps_not_fixed;
 
@@ -882,7 +890,11 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
   }
 
   self->already_negotiated = TRUE;
-  goto done;
+  goto end;
+
+sinkcaps_not_ready:
+  GST_ERROR_OBJECT (self, "sink caps not ready: %" GST_PTR_FORMAT, sinkcaps);
+  goto end;
 
 setup_failed:
   GST_ERROR_OBJECT (self, "could not setup m2m");
@@ -895,13 +907,13 @@ srccaps_not_fixed:
 
 sinkcaps_not_fixed:
   GST_ERROR_OBJECT (self, "sink caps not fixed: %" GST_PTR_FORMAT, sinkcaps);
-  goto failed;
+  goto end;
 
 failed:
   result = FALSE;
-  goto done;
+  goto end;
 
-done:
+end:
   return result;
 }
 
