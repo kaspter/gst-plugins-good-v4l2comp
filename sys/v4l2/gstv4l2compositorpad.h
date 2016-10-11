@@ -40,6 +40,15 @@ typedef struct _GstV4l2CompositorJob GstV4l2CompositorJob;
 struct _GstV4l2Compositor;
 typedef struct _GstV4l2Compositor GstV4l2Compositor;
 
+enum _GstV4l2CompositorJobState
+{
+  GST_V4L2_COMPOSITOR_JOB_READY,
+  GST_V4L2_COMPOSITOR_JOB_PREPARED,
+  GST_V4L2_COMPOSITOR_JOB_QUEUED,
+  GST_V4L2_COMPOSITOR_JOB_GONE,
+};
+typedef enum _GstV4l2CompositorJobState GstV4l2CompositorJobState;
+
 struct _GstV4l2CompositorJob
 {
   GstV4l2Compositor *parent;
@@ -48,7 +57,7 @@ struct _GstV4l2CompositorJob
   GstBuffer *sink_buf;
   GstBuffer *external_sink_buf;
   GstBuffer *source_buf;
-  char state;
+  GstV4l2CompositorJobState state;
 };
 
 /**
