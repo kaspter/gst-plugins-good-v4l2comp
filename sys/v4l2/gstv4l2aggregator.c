@@ -1275,8 +1275,8 @@ gst_v4l2_aggregator_change_state (GstElement * element,
   }
 
   if ((ret =
-          GST_ELEMENT_CLASS (v4l2_aggregator_parent_class)->
-          change_state (element, transition)) == GST_STATE_CHANGE_FAILURE)
+          GST_ELEMENT_CLASS (v4l2_aggregator_parent_class)->change_state
+          (element, transition)) == GST_STATE_CHANGE_FAILURE)
     goto failure;
 
 
@@ -2329,10 +2329,11 @@ flushing:
   return FALSE;
 }
 
-static gboolean
+static GstFlowReturn
 gst_v4l2_aggregator_pad_event_func (GstPad * pad, GstObject * parent,
     GstEvent * event)
 {
+  GstFlowReturn ret = GST_FLOW_OK;
   GstV4l2Aggregator *self = GST_V4L2_AGGREGATOR (parent);
   GstV4l2AggregatorPad *aggpad = GST_V4L2_AGGREGATOR_PAD (pad);
   GstV4l2AggregatorClass *klass = GST_V4L2_AGGREGATOR_GET_CLASS (parent);
@@ -2343,8 +2344,10 @@ gst_v4l2_aggregator_pad_event_func (GstPad * pad, GstObject * parent,
     PAD_LOCK (aggpad);
 
     if (aggpad->priv->flow_return != GST_FLOW_OK
-        && GST_EVENT_TYPE (event) != GST_EVENT_FLUSH_STOP)
+        && GST_EVENT_TYPE (event) != GST_EVENT_FLUSH_STOP) {
+      ret = aggpad->priv->flow_return;
       goto flushing;
+    }
 
     if (GST_EVENT_TYPE (event) == GST_EVENT_SEGMENT) {
       GST_OBJECT_LOCK (aggpad);
@@ -2366,10 +2369,22 @@ gst_v4l2_aggregator_pad_event_func (GstPad * pad, GstObject * parent,
     SRC_UNLOCK (self);
   }
 
-  if (event)
-    return klass->sink_event (self, aggpad, event);
-  else
-    return TRUE;
+  if (event) {
+    if (!klass->sink_event (self, aggpad, event)) {
+      /* Copied from GstPad to convert boolean to a GstFlowReturn in
+       * the event handling func */
+      switch (GST_EVENT_TYPE (event)) {
+        case GST_EVENT_CAPS:
+          ret = GST_FLOW_NOT_NEGOTIATED;
+          break;
+        default:
+          ret = GST_FLOW_ERROR;
+          break;
+      }
+    }
+  }
+
+  return ret;
 
 flushing:
   GST_DEBUG_OBJECT (aggpad, "Pad is %s, dropping event",
@@ -2379,7 +2394,8 @@ flushing:
   if (GST_EVENT_IS_STICKY (event))
     gst_pad_store_sticky_event (pad, event);
   gst_event_unref (event);
-  return FALSE;
+
+  return ret;
 }
 
 static gboolean
@@ -2416,8 +2432,8 @@ gst_v4l2_aggregator_pad_constructed (GObject * object)
 
   gst_pad_set_chain_function (pad,
       GST_DEBUG_FUNCPTR (gst_v4l2_aggregator_pad_chain));
-  gst_pad_set_event_function (pad,
-      GST_DEBUG_FUNCPTR (gst_v4l2_aggregator_pad_event_func));
+  gst_pad_set_event_full_function_full (pad,
+      GST_DEBUG_FUNCPTR (gst_v4l2_aggregator_pad_event_func), NULL, NULL);
   gst_pad_set_query_function (pad,
       GST_DEBUG_FUNCPTR (gst_v4l2_aggregator_pad_query_func));
   gst_pad_set_activatemode_function (pad,
