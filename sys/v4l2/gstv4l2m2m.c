@@ -309,12 +309,13 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m,
   gboolean ok;
   int ret;
   enum v4l2_memory memory;
+  GstV4l2Error error = GST_V4L2_ERROR_INIT;
 
   ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, &memory);
   if (!ok)
     return FALSE;
 
-  ok = gst_v4l2_object_set_format (m2m->source_obj, source_caps);
+  ok = gst_v4l2_object_set_format (m2m->source_obj, source_caps, &error);
   if (!ok)
     return FALSE;
 
@@ -326,7 +327,7 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m,
   if (ret < nbufs)
     return FALSE;
 
-  ok = gst_v4l2_object_set_format (m2m->sink_obj, sink_caps);
+  ok = gst_v4l2_object_set_format (m2m->sink_obj, sink_caps, &error);
   if (!ok)
     return FALSE;
 
