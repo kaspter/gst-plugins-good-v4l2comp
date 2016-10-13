@@ -61,10 +61,6 @@ struct _GstV4l2Error
     gint line;
 };
 
-GstV4l2Iterator *  gst_v4l2_iterator_new (void);
-gboolean           gst_v4l2_iterator_next (GstV4l2Iterator *it);
-void               gst_v4l2_iterator_free (GstV4l2Iterator *it);
-
 struct _GstV4l2VideoCData
 {
   gchar *device;

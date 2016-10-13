@@ -259,7 +259,6 @@ gst_v4l2_video_enc_set_format (GstVideoEncoder * encoder,
   }
 
   ret = gst_v4l2_object_set_format (self->v4l2output, state->caps, &error);
-
   if (ret)
     self->input_state = gst_video_codec_state_ref (state);
 
