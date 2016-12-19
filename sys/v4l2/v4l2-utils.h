@@ -43,12 +43,13 @@ G_BEGIN_DECLS
 
 typedef struct _GstV4l2Iterator GstV4l2Iterator;
 typedef struct _GstV4l2Error GstV4l2Error;
+typedef struct _GstV4l2VideoCData GstV4l2VideoCData;
 
 struct _GstV4l2Iterator
 {
-    const gchar *device_path;
-    const gchar *device_name;
-    const gchar *sys_path;
+  const gchar *device_path;
+  const gchar *device_name;
+  const gchar *sys_path;
 };
 
 struct _GstV4l2Error
@@ -60,19 +61,27 @@ struct _GstV4l2Error
     gint line;
 };
 
-GstV4l2Iterator *  gst_v4l2_iterator_new (void);
-gboolean           gst_v4l2_iterator_next (GstV4l2Iterator *it);
-void               gst_v4l2_iterator_free (GstV4l2Iterator *it);
-
-const gchar *      gst_v4l2_iterator_get_device_path (GstV4l2Iterator *it);
-const gchar *      gst_v4l2_iterator_get_device_name (GstV4l2Iterator *it);
-const gchar *      gst_v4l2_iterator_get_sys_path (GstV4l2Iterator *it);
+struct _GstV4l2VideoCData
+{
+  gchar *device;
+  GstCaps *sink_caps;
+  GstCaps *src_caps;
+};
 
 void               gst_v4l2_clear_error (GstV4l2Error *error);
 void               gst_v4l2_error (gpointer element, GstV4l2Error *error);
 
+GstV4l2Iterator *gst_v4l2_iterator_new (void);
+gboolean gst_v4l2_iterator_next (GstV4l2Iterator * it);
+void gst_v4l2_iterator_free (GstV4l2Iterator * it);
+
+const gchar *gst_v4l2_iterator_get_device_path (GstV4l2Iterator * it);
+const gchar *gst_v4l2_iterator_get_device_name (GstV4l2Iterator * it);
+const gchar *gst_v4l2_iterator_get_sys_path (GstV4l2Iterator * it);
+
+gboolean
+gst_v4l2_element_register (GstPlugin * plugin, const gchar * basename,
+    const gchar * device_path, GstCaps * sink_caps, GstCaps * src_caps);
+
 G_END_DECLS
-
 #endif /* __V4L2_UTILS_H__ */
-
-

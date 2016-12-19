@@ -46,9 +46,9 @@
 #include "gstv4l2src.h"
 #include "gstv4l2sink.h"
 #include "gstv4l2radio.h"
-#include "gstv4l2videodec.h"
 #include "gstv4l2deviceprovider.h"
 #include "gstv4l2transform.h"
+#include "gstv4l2h264enc.h"
 
 /* used in v4l2_calls.c and v4l2src_calls.c */
 GST_DEBUG_CATEGORY (v4l2_debug);
@@ -182,13 +182,11 @@ gst_v4l2_probe_and_register (GstPlugin * plugin)
 
     basename = g_path_get_basename (it->device_path);
 
-    if (gst_v4l2_is_video_dec (sink_caps, src_caps))
-      ret = gst_v4l2_video_dec_register (plugin, basename, it->device_path,
-          sink_caps, src_caps);
-    else if (gst_v4l2_is_transform (sink_caps, src_caps))
+    gst_v4l2_element_register (plugin, basename, it->device_path,
+        sink_caps, src_caps);
+    if (gst_v4l2_is_transform (sink_caps, src_caps))
       ret = gst_v4l2_transform_register (plugin, basename, it->device_path,
           sink_caps, src_caps);
-    /* else if ( ... etc. */
 
     gst_caps_unref (sink_caps);
     gst_caps_unref (src_caps);
@@ -226,6 +224,8 @@ plugin_init (GstPlugin * plugin)
           GST_TYPE_V4L2SINK) ||
       !gst_element_register (plugin, "v4l2radio", GST_RANK_NONE,
           GST_TYPE_V4L2RADIO) ||
+      !gst_element_register (plugin, "v4l2h264enc", GST_RANK_NONE,
+          GST_TYPE_V4L2_H264_ENC) ||
       !gst_device_provider_register (plugin, "v4l2deviceprovider",
           GST_RANK_PRIMARY, GST_TYPE_V4L2_DEVICE_PROVIDER)
       /* etc. */
