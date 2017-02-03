@@ -851,7 +851,7 @@ no_buffers:
   }
 start_failed:
   {
-    GST_ERROR_OBJECT (pool, "allocate failed");
+    GST_ERROR_OBJECT (pool, "failed to start streaming");
     return FALSE;
   }
 other_pool_failed:
@@ -955,8 +955,8 @@ gst_v4l2_buffer_pool_flush_stop (GstBufferPool * bpool)
   GST_OBJECT_LOCK (pool);
   gst_v4l2_buffer_pool_streamoff (pool);
   /* Remember buffers to re-enqueue */
-  memcpy(buffers, pool->buffers, sizeof(buffers));
-  memset(pool->buffers, 0, sizeof(pool->buffers));
+  memcpy (buffers, pool->buffers, sizeof (buffers));
+  memset (pool->buffers, 0, sizeof (pool->buffers));
   GST_OBJECT_UNLOCK (pool);
 
   /* Reset our state */
@@ -1868,7 +1868,6 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
 
           GST_LOG_OBJECT (pool, "processing buffer %i from our pool", index);
 
-          index = group->buffer.index;
           if (pool->buffers[index] != NULL) {
             GST_LOG_OBJECT (pool, "buffer %i already queued, copying", index);
             goto copying;

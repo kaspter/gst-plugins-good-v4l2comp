@@ -2172,8 +2172,12 @@ gst_v4l2_object_add_interlace_mode (GstV4l2Object * v4l2object,
     gst_value_list_append_and_take_value (&interlace_formats, &interlace_enum);
   }
 
-  gst_v4l2src_value_simplify (&interlace_formats);
-  gst_structure_take_value (s, "interlace-mode", &interlace_formats);
+  if (gst_v4l2src_value_simplify (&interlace_formats)
+      || gst_value_list_get_size (&interlace_formats) > 0)
+    gst_structure_take_value (s, "interlace-mode", &interlace_formats);
+  else
+    GST_WARNING_OBJECT (v4l2object, "Failed to determine interlace mode");
+
   return;
 }
 
@@ -3486,7 +3490,7 @@ gst_v4l2_object_set_format_full (GstV4l2Object * v4l2object, GstCaps * caps,
     goto set_parm_failed;
 
   if (streamparm.parm.capture.timeperframe.numerator > 0 &&
-    streamparm.parm.capture.timeperframe.denominator > 0) {
+      streamparm.parm.capture.timeperframe.denominator > 0) {
     /* get new values */
     fps_d = streamparm.parm.capture.timeperframe.numerator;
     fps_n = streamparm.parm.capture.timeperframe.denominator;
@@ -3496,8 +3500,7 @@ gst_v4l2_object_set_format_full (GstV4l2Object * v4l2object, GstCaps * caps,
   } else {
     /* fix v4l2 capture driver to provide framerate values */
     GST_WARNING_OBJECT (v4l2object->element,
-        "Reuse caps framerate %u/%u - fix v4l2 capture driver",
-        fps_n, fps_d);
+        "Reuse caps framerate %u/%u - fix v4l2 capture driver", fps_n, fps_d);
   }
 
   GST_VIDEO_INFO_FPS_N (&info) = fps_n;
@@ -3914,7 +3917,6 @@ gst_v4l2_object_get_caps (GstV4l2Object * v4l2object, GstCaps * filter)
   }
 
   GST_INFO_OBJECT (v4l2object->element, "probed caps: %" GST_PTR_FORMAT, ret);
-  LOG_CAPS (v4l2object->element, ret);
 
   return ret;
 }
