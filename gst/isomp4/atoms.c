@@ -1544,6 +1544,17 @@ atom_write_size (guint8 ** buffer, guint64 * size, guint64 * offset,
   prop_copy_uint32 (*offset - atom_pos, buffer, size, &atom_pos);
 }
 
+static guint64
+atom_copy_empty (Atom * atom, guint8 ** buffer, guint64 * size,
+    guint64 * offset)
+{
+  guint64 original_offset = *offset;
+
+  prop_copy_uint32 (0, buffer, size, offset);
+
+  return *offset - original_offset;
+}
+
 guint64
 atom_copy_data (Atom * atom, guint8 ** buffer, guint64 * size, guint64 * offset)
 {
@@ -2198,10 +2209,18 @@ atom_stsc_copy_data (AtomSTSC * stsc, guint8 ** buffer, guint64 * size,
     guint64 * offset)
 {
   guint64 original_offset = *offset;
-  guint i;
+  guint i, len;
 
   if (!atom_full_copy_data (&stsc->header, buffer, size, offset)) {
     return 0;
+  }
+
+  /* Last two entries might be the same size here as we only merge once the
+   * next chunk is started */
+  if ((len = atom_array_get_len (&stsc->entries)) > 1 &&
+      ((atom_array_index (&stsc->entries, len - 1)).samples_per_chunk ==
+          (atom_array_index (&stsc->entries, len - 2)).samples_per_chunk)) {
+    stsc->entries.len--;
   }
 
   prop_copy_uint32 (atom_array_get_len (&stsc->entries), buffer, size, offset);
@@ -2802,6 +2821,11 @@ atom_trak_copy_data (AtomTRAK * trak, guint8 ** buffer, guint64 * size,
   if (!atom_tkhd_copy_data (&trak->tkhd, buffer, size, offset)) {
     return 0;
   }
+  if (trak->tapt) {
+    if (!trak->tapt->copy_data_func (trak->tapt->atom, buffer, size, offset)) {
+      return 0;
+    }
+  }
   if (trak->edts) {
     if (!atom_edts_copy_data (trak->edts, buffer, size, offset)) {
       return 0;
@@ -2891,18 +2915,39 @@ atom_wave_copy_data (AtomWAVE * wave, guint8 ** buffer,
 static void
 atom_stsc_add_new_entry (AtomSTSC * stsc, guint32 first_chunk, guint32 nsamples)
 {
-  STSCEntry nentry;
   gint len;
 
-  if ((len = atom_array_get_len (&stsc->entries)) &&
+  if ((len = atom_array_get_len (&stsc->entries)) > 1 &&
       ((atom_array_index (&stsc->entries, len - 1)).samples_per_chunk ==
-          nsamples))
-    return;
+          (atom_array_index (&stsc->entries, len - 2)).samples_per_chunk)) {
+    STSCEntry *nentry;
 
-  nentry.first_chunk = first_chunk;
-  nentry.samples_per_chunk = nsamples;
-  nentry.sample_description_index = 1;
-  atom_array_append (&stsc->entries, nentry, 128);
+    /* Merge last two entries as they have the same number of samples per chunk */
+    nentry = &atom_array_index (&stsc->entries, len - 1);
+    nentry->first_chunk = first_chunk;
+    nentry->samples_per_chunk = nsamples;
+    nentry->sample_description_index = 1;
+  } else {
+    STSCEntry nentry;
+
+    nentry.first_chunk = first_chunk;
+    nentry.samples_per_chunk = nsamples;
+    nentry.sample_description_index = 1;
+    atom_array_append (&stsc->entries, nentry, 128);
+  }
+}
+
+static void
+atom_stsc_update_entry (AtomSTSC * stsc, guint32 first_chunk, guint32 nsamples)
+{
+  gint len;
+
+  len = atom_array_get_len (&stsc->entries);
+  g_assert (len != 0);
+  g_assert (atom_array_index (&stsc->entries,
+          len - 1).first_chunk == first_chunk);
+
+  atom_array_index (&stsc->entries, len - 1).samples_per_chunk += nsamples;
 }
 
 static void
@@ -2946,12 +2991,22 @@ atom_stco64_get_entry_count (AtomSTCO64 * stco64)
   return atom_array_get_len (&stco64->entries);
 }
 
-static void
+/* returns TRUE if a new entry was added */
+static gboolean
 atom_stco64_add_entry (AtomSTCO64 * stco64, guint64 entry)
 {
+  guint32 len;
+
+  /* Only add a new entry if the chunk offset changed */
+  if ((len = atom_array_get_len (&stco64->entries)) &&
+      ((atom_array_index (&stco64->entries, len - 1)) == entry))
+    return FALSE;
+
   atom_array_append (&stco64->entries, entry, 256);
   if (entry > G_MAXUINT32)
     stco64->header.header.type = FOURCC_co64;
+
+  return TRUE;
 }
 
 void
@@ -3011,9 +3066,14 @@ atom_stbl_add_samples (AtomSTBL * stbl, guint32 nsamples, guint32 delta,
 {
   atom_stts_add_entry (&stbl->stts, nsamples, delta);
   atom_stsz_add_entry (&stbl->stsz, nsamples, size);
-  atom_stco64_add_entry (&stbl->stco64, chunk_offset);
-  atom_stsc_add_new_entry (&stbl->stsc,
-      atom_stco64_get_entry_count (&stbl->stco64), nsamples);
+  if (atom_stco64_add_entry (&stbl->stco64, chunk_offset)) {
+    atom_stsc_add_new_entry (&stbl->stsc,
+        atom_stco64_get_entry_count (&stbl->stco64), nsamples);
+  } else {
+    atom_stsc_update_entry (&stbl->stsc,
+        atom_stco64_get_entry_count (&stbl->stco64), nsamples);
+  }
+
   if (sync)
     atom_stbl_add_stss_entry (stbl);
   /* always store to arrange for consistent content */
@@ -3132,23 +3192,24 @@ timecode_atom_trak_set_duration (AtomTRAK * trak, guint64 duration,
   g_assert (trak->mdia.minf.gmhd != NULL);
   g_assert (atom_array_get_len (&trak->mdia.minf.stbl.stts.entries) == 1);
 
-  trak->tkhd.duration = duration;
-  trak->mdia.mdhd.time_info.duration = duration;
-  trak->mdia.mdhd.time_info.timescale = timescale;
-
-  entry = &atom_array_index (&trak->mdia.minf.stbl.stts.entries, 0);
-  entry->sample_delta = duration;
-
   for (iter = trak->mdia.minf.stbl.stsd.entries; iter;
       iter = g_list_next (iter)) {
     SampleTableEntry *entry = iter->data;
     if (entry->kind == TIMECODE) {
       SampleTableEntryTMCD *tmcd = (SampleTableEntryTMCD *) entry;
 
-      tmcd->frame_duration = tmcd->frame_duration * timescale / tmcd->timescale;
-      tmcd->timescale = timescale;
+      duration = duration * tmcd->timescale / timescale;
+      timescale = tmcd->timescale;
+      break;
     }
   }
+
+  trak->tkhd.duration = duration;
+  trak->mdia.mdhd.time_info.duration = duration;
+  trak->mdia.mdhd.time_info.timescale = timescale;
+
+  entry = &atom_array_index (&trak->mdia.minf.stbl.stts.entries, 0);
+  entry->sample_delta = duration;
 }
 
 static guint32
@@ -3719,7 +3780,10 @@ atom_trak_add_timecode_entry (AtomTRAK * trak, AtomsContext * context,
   tmcd->name.name = g_strdup ("Tape");
   tmcd->timescale = tc->config.fps_n;
   tmcd->frame_duration = tc->config.fps_d;
-  tmcd->n_frames = tc->config.fps_n / tc->config.fps_d;
+  if (tc->config.fps_d == 1001)
+    tmcd->n_frames = tc->config.fps_n / 1000;
+  else
+    tmcd->n_frames = tc->config.fps_n / tc->config.fps_d;
 
   stsd->entries = g_list_prepend (stsd->entries, tmcd);
   stsd->n_entries++;
@@ -3915,6 +3979,183 @@ build_pasp_extension (gint par_width, gint par_height)
       atom_data_free);
 }
 
+AtomInfo *
+build_fiel_extension (GstVideoInterlaceMode mode, GstVideoFieldOrder order)
+{
+  AtomData *atom_data = atom_data_new (FOURCC_fiel);
+  guint8 *data;
+  gint field_order;
+  gint interlace;
+
+  atom_data_alloc_mem (atom_data, 2);
+  data = atom_data->data;
+
+  if (mode == GST_VIDEO_INTERLACE_MODE_PROGRESSIVE) {
+    interlace = 1;
+    field_order = 0;
+  } else if (mode == GST_VIDEO_INTERLACE_MODE_INTERLEAVED) {
+    interlace = 2;
+    field_order = order == GST_VIDEO_FIELD_ORDER_TOP_FIELD_FIRST ? 9 : 14;
+  } else {
+    interlace = 0;
+    field_order = 0;
+  }
+
+  GST_WRITE_UINT8 (data, interlace);
+  GST_WRITE_UINT8 (data + 1, field_order);
+
+  return build_atom_info_wrapper ((Atom *) atom_data, atom_data_copy_data,
+      atom_data_free);
+}
+
+AtomInfo *
+build_colr_extension (const GstVideoColorimetry * colorimetry, gboolean is_mp4)
+{
+  AtomData *atom_data = atom_data_new (FOURCC_colr);
+  guint8 *data;
+  guint16 primaries;
+  guint16 transfer_function;
+  guint16 matrix;
+
+  switch (colorimetry->primaries) {
+    case GST_VIDEO_COLOR_PRIMARIES_BT709:
+      primaries = 1;
+      break;
+    case GST_VIDEO_COLOR_PRIMARIES_BT470BG:
+      primaries = 5;
+      break;
+    case GST_VIDEO_COLOR_PRIMARIES_SMPTE170M:
+    case GST_VIDEO_COLOR_PRIMARIES_SMPTE240M:
+      primaries = 6;
+      break;
+    case GST_VIDEO_COLOR_PRIMARIES_BT2020:
+      primaries = 9;
+      break;
+    case GST_VIDEO_COLOR_PRIMARIES_UNKNOWN:
+    default:
+      primaries = 2;
+      break;
+  }
+
+  switch (colorimetry->transfer) {
+    case GST_VIDEO_TRANSFER_BT709:
+      transfer_function = 1;
+      break;
+    case GST_VIDEO_TRANSFER_SMPTE240M:
+      transfer_function = 7;
+      break;
+    case GST_VIDEO_TRANSFER_UNKNOWN:
+    default:
+      transfer_function = 2;
+      break;
+  }
+
+  switch (colorimetry->matrix) {
+    case GST_VIDEO_COLOR_MATRIX_BT709:
+      matrix = 1;
+      break;
+    case GST_VIDEO_COLOR_MATRIX_BT601:
+      matrix = 6;
+      break;
+    case GST_VIDEO_COLOR_MATRIX_SMPTE240M:
+      matrix = 7;
+      break;
+    case GST_VIDEO_COLOR_MATRIX_BT2020:
+      matrix = 9;
+      break;
+    case GST_VIDEO_COLOR_MATRIX_UNKNOWN:
+    default:
+      matrix = 2;
+      break;
+  }
+
+  atom_data_alloc_mem (atom_data, 10 + (is_mp4 ? 1 : 0));
+  data = atom_data->data;
+
+  /* colour specification box */
+  if (is_mp4)
+    GST_WRITE_UINT32_LE (data, FOURCC_nclx);
+  else
+    GST_WRITE_UINT32_LE (data, FOURCC_nclc);
+
+  GST_WRITE_UINT16_BE (data + 4, primaries);
+  GST_WRITE_UINT16_BE (data + 6, transfer_function);
+  GST_WRITE_UINT16_BE (data + 8, matrix);
+
+  if (is_mp4) {
+    GST_WRITE_UINT8 (data + 10,
+        colorimetry->range == GST_VIDEO_COLOR_RANGE_0_255 ? 0x80 : 0x00);
+  }
+
+  return build_atom_info_wrapper ((Atom *) atom_data, atom_data_copy_data,
+      atom_data_free);
+}
+
+AtomInfo *
+build_clap_extension (gint width_n, gint width_d, gint height_n, gint height_d,
+    gint h_off_n, gint h_off_d, gint v_off_n, gint v_off_d)
+{
+  AtomData *atom_data = atom_data_new (FOURCC_clap);
+  guint8 *data;
+
+  atom_data_alloc_mem (atom_data, 32);
+  data = atom_data->data;
+
+  GST_WRITE_UINT32_BE (data, width_n);
+  GST_WRITE_UINT32_BE (data + 4, width_d);
+  GST_WRITE_UINT32_BE (data + 8, height_n);
+  GST_WRITE_UINT32_BE (data + 12, height_d);
+  GST_WRITE_UINT32_BE (data + 16, h_off_n);
+  GST_WRITE_UINT32_BE (data + 20, h_off_d);
+  GST_WRITE_UINT32_BE (data + 24, v_off_n);
+  GST_WRITE_UINT32_BE (data + 28, v_off_d);
+
+  return build_atom_info_wrapper ((Atom *) atom_data, atom_data_copy_data,
+      atom_data_free);
+}
+
+AtomInfo *
+build_tapt_extension (gint clef_width, gint clef_height, gint prof_width,
+    gint prof_height, gint enof_width, gint enof_height)
+{
+  AtomData *atom_data = atom_data_new (FOURCC_tapt);
+  guint8 *data;
+
+  atom_data_alloc_mem (atom_data, 60);
+  data = atom_data->data;
+
+  GST_WRITE_UINT32_BE (data, 20);
+  GST_WRITE_UINT32_LE (data + 4, FOURCC_clef);
+  GST_WRITE_UINT32_BE (data + 8, 0);
+  GST_WRITE_UINT32_BE (data + 12, clef_width);
+  GST_WRITE_UINT32_BE (data + 16, clef_height);
+
+  GST_WRITE_UINT32_BE (data + 20, 20);
+  GST_WRITE_UINT32_LE (data + 24, FOURCC_prof);
+  GST_WRITE_UINT32_BE (data + 28, 0);
+  GST_WRITE_UINT32_BE (data + 32, prof_width);
+  GST_WRITE_UINT32_BE (data + 36, prof_height);
+
+  GST_WRITE_UINT32_BE (data + 40, 20);
+  GST_WRITE_UINT32_LE (data + 44, FOURCC_enof);
+  GST_WRITE_UINT32_BE (data + 48, 0);
+  GST_WRITE_UINT32_BE (data + 52, enof_width);
+  GST_WRITE_UINT32_BE (data + 56, enof_height);
+
+
+  return build_atom_info_wrapper ((Atom *) atom_data, atom_data_copy_data,
+      atom_data_free);
+}
+
+static AtomInfo *
+build_mov_video_sample_description_padding_extension (void)
+{
+  AtomData *atom_data = atom_data_new (FOURCC_clap);
+
+  return build_atom_info_wrapper ((Atom *) atom_data, atom_copy_empty,
+      atom_data_free);
+}
+
 SampleTableEntryMP4V *
 atom_trak_set_video_type (AtomTRAK * trak, AtomsContext * context,
     VisualSampleEntry * entry, guint32 scale, GList * ext_atoms_list)
@@ -3923,11 +4164,8 @@ atom_trak_set_video_type (AtomTRAK * trak, AtomsContext * context,
   guint dwidth, dheight;
   gint par_n = 0, par_d = 0;
 
-  if ((entry->par_n != 1 || entry->par_d != 1) &&
-      (entry->par_n != entry->par_d)) {
-    par_n = entry->par_n;
-    par_d = entry->par_d;
-  }
+  par_n = entry->par_n;
+  par_d = entry->par_d;
 
   dwidth = entry->width;
   dheight = entry->height;
@@ -3959,10 +4197,14 @@ atom_trak_set_video_type (AtomTRAK * trak, AtomsContext * context,
   if (ext_atoms_list)
     ste->extension_atoms = g_list_concat (ste->extension_atoms, ext_atoms_list);
 
-  /* QT spec has a pasp extension atom in stsd that can hold PAR */
-  if (par_n && (context->flavor == ATOMS_TREE_FLAVOR_MOV)) {
-    ste->extension_atoms = g_list_append (ste->extension_atoms,
-        build_pasp_extension (par_n, par_d));
+  ste->extension_atoms = g_list_append (ste->extension_atoms,
+      build_pasp_extension (par_n, par_d));
+
+  if (context->flavor == ATOMS_TREE_FLAVOR_MOV) {
+    /* append 0 as a terminator "length" to work around some broken software */
+    ste->extension_atoms =
+        g_list_append (ste->extension_atoms,
+        build_mov_video_sample_description_padding_extension ());
   }
 
   return ste;
@@ -4126,6 +4368,26 @@ atom_tfhd_copy_data (AtomTFHD * tfhd, guint8 ** buffer, guint64 * size,
 }
 
 static guint64
+atom_tfdt_copy_data (AtomTFDT * tfdt, guint8 ** buffer, guint64 * size,
+    guint64 * offset)
+{
+  guint64 original_offset = *offset;
+
+  if (!atom_full_copy_data (&tfdt->header, buffer, size, offset)) {
+    return 0;
+  }
+
+  /* 32-bit time if version == 0 else 64-bit: */
+  if (tfdt->header.version == 0)
+    prop_copy_uint32 (tfdt->base_media_decode_time, buffer, size, offset);
+  else
+    prop_copy_uint64 (tfdt->base_media_decode_time, buffer, size, offset);
+
+  atom_write_size (buffer, size, offset, original_offset);
+  return *offset - original_offset;
+}
+
+static guint64
 atom_trun_copy_data (AtomTRUN * trun, guint8 ** buffer, guint64 * size,
     guint64 * offset, guint32 * data_offset)
 {
@@ -4206,6 +4468,9 @@ atom_traf_copy_data (AtomTRAF * traf, guint8 ** buffer, guint64 * size,
   if (!atom_tfhd_copy_data (&traf->tfhd, buffer, size, offset)) {
     return 0;
   }
+  if (!atom_tfdt_copy_data (&traf->tfdt, buffer, size, offset)) {
+    return 0;
+  }
 
   walker = g_list_first (traf->truns);
   while (walker != NULL) {
@@ -4276,6 +4541,15 @@ atom_tfhd_init (AtomTFHD * tfhd, guint32 track_ID)
   tfhd->default_sample_duration = 0;
   tfhd->default_sample_size = 0;
   tfhd->default_sample_flags = 0;
+}
+
+static void
+atom_tfdt_init (AtomTFDT * tfdt)
+{
+  guint8 flags[3] = { 0, 0, 0 };
+  atom_full_init (&tfdt->header, FOURCC_tfdt, 0, 0, 0, flags);
+
+  tfdt->base_media_decode_time = 0;
 }
 
 static void
@@ -4352,6 +4626,7 @@ static void
 atom_traf_init (AtomTRAF * traf, AtomsContext * context, guint32 track_ID)
 {
   atom_header_set (&traf->header, FOURCC_traf, 0, 0);
+  atom_tfdt_init (&traf->tfdt);
   atom_tfhd_init (&traf->tfhd, track_ID);
   traf->truns = NULL;
 
@@ -4366,6 +4641,15 @@ atom_traf_new (AtomsContext * context, guint32 track_ID)
 
   atom_traf_init (traf, context, track_ID);
   return traf;
+}
+
+void
+atom_traf_set_base_decode_time (AtomTRAF * traf, guint64 base_decode_time)
+{
+  traf->tfdt.base_media_decode_time = base_decode_time;
+  /* If we need to write a 64-bit tfdt, set the atom version */
+  if (base_decode_time > G_MAXUINT32)
+    traf->tfdt.header.version = 1;
 }
 
 static void
@@ -4781,22 +5065,6 @@ build_mov_alac_extension (const GstBuffer * codec_data)
   alac = build_codec_data_extension (FOURCC_alac, codec_data);
 
   return build_mov_wave_extension (FOURCC_alac, NULL, alac, TRUE);
-}
-
-AtomInfo *
-build_fiel_extension (gint fields)
-{
-  AtomData *atom_data;
-  guint8 f = fields;
-
-  if (fields == 1) {
-    return NULL;
-  }
-
-  atom_data = atom_data_new_from_data (FOURCC_fiel, &f, 1);
-
-  return build_atom_info_wrapper ((Atom *) atom_data, atom_data_copy_data,
-      atom_data_free);
 }
 
 AtomInfo *
