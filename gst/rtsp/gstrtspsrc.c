@@ -343,13 +343,13 @@ typedef struct
 } PtMapItem;
 
 /* commands we send to out loop to notify it of events */
-#define CMD_OPEN	(1 << 0)
-#define CMD_PLAY	(1 << 1)
-#define CMD_PAUSE	(1 << 2)
-#define CMD_CLOSE	(1 << 3)
-#define CMD_WAIT	(1 << 4)
-#define CMD_RECONNECT	(1 << 5)
-#define CMD_LOOP	(1 << 6)
+#define CMD_OPEN       (1 << 0)
+#define CMD_PLAY       (1 << 1)
+#define CMD_PAUSE      (1 << 2)
+#define CMD_CLOSE      (1 << 3)
+#define CMD_WAIT       (1 << 4)
+#define CMD_RECONNECT  (1 << 5)
+#define CMD_LOOP       (1 << 6)
 
 /* mask for all commands */
 #define CMD_ALL         ((CMD_LOOP << 1) - 1)
@@ -1339,7 +1339,10 @@ find_stream_by_id (GstRTSPStream * stream, gint * id)
 static gint
 find_stream_by_channel (GstRTSPStream * stream, gint * channel)
 {
-  if (stream->channel[0] == *channel || stream->channel[1] == *channel)
+  /* ignore unconfigured channels here (e.g., those that
+   * were explicitly skipped during SETUP) */
+  if ((stream->channelpad[0] != NULL) &&
+      (stream->channel[0] == *channel || stream->channel[1] == *channel))
     return 0;
 
   return -1;
@@ -1612,7 +1615,8 @@ clear_ptmap_item (PtMapItem * item)
 }
 
 static GstRTSPStream *
-gst_rtspsrc_create_stream (GstRTSPSrc * src, GstSDPMessage * sdp, gint idx)
+gst_rtspsrc_create_stream (GstRTSPSrc * src, GstSDPMessage * sdp, gint idx,
+    gint n_streams)
 {
   GstRTSPStream *stream;
   const gchar *control_url;
@@ -1666,6 +1670,11 @@ gst_rtspsrc_create_stream (GstRTSPSrc * src, GstSDPMessage * sdp, gint idx)
   GST_DEBUG_OBJECT (src, " port: %d", stream->port);
   GST_DEBUG_OBJECT (src, " container: %d", stream->container);
   GST_DEBUG_OBJECT (src, " control: %s", GST_STR_NULL (control_url));
+
+  /* RFC 2326, C.3: missing control_url permitted in case of a single stream */
+  if (control_url == NULL && n_streams == 1) {
+    control_url = "";
+  }
 
   if (control_url != NULL) {
     stream->control_url = g_strdup (control_url);
@@ -4178,6 +4187,7 @@ gst_rtsp_conninfo_close (GstRTSPSrc * src, GstRTSPConnInfo * info,
     GST_DEBUG_OBJECT (src, "freeing connection...");
     gst_rtsp_connection_free (info->connection);
     info->connection = NULL;
+    info->flushing = FALSE;
   }
   GST_RTSP_STATE_UNLOCK (src);
   return GST_RTSP_OK;
@@ -4874,30 +4884,26 @@ gst_rtspsrc_reconnect (GstRTSPSrc * src, gboolean async)
   if (!restart)
     goto done;
 
-  /* unless redirect, try tcp */
-  if (!src->need_redirect)
-    src->cur_protocols = GST_RTSP_LOWER_TRANS_TCP;
+  /* we can try only TCP now */
+  src->cur_protocols = GST_RTSP_LOWER_TRANS_TCP;
 
   /* close and cleanup our state */
   if ((res = gst_rtspsrc_close (src, async, FALSE)) < 0)
     goto done;
 
-  /* unless redirect, see if we have TCP left to try. Also don't 
-   * try TCP when we were configured with an SDP. */
-  if (!src->need_redirect && (!(src->protocols & GST_RTSP_LOWER_TRANS_TCP)
-          || src->from_sdp))
+  /* see if we have TCP left to try. Also don't try TCP when we were configured
+   * with an SDP. */
+  if (!(src->protocols & GST_RTSP_LOWER_TRANS_TCP) || src->from_sdp)
     goto no_protocols;
 
-  if (!src->need_redirect) {
-    /* We post a warning message now to inform the user
-     * that nothing happened. It's most likely a firewall thing. */
-    GST_ELEMENT_WARNING (src, RESOURCE, READ, (NULL),
-        ("Could not receive any UDP packets for %.4f seconds, maybe your "
-            "firewall is blocking it. Retrying using a tcp connection.",
-            gst_guint64_to_gdouble (src->udp_timeout) / 1000000.0));
-  }
+  /* We post a warning message now to inform the user
+   * that nothing happened. It's most likely a firewall thing. */
+  GST_ELEMENT_WARNING (src, RESOURCE, READ, (NULL),
+      ("Could not receive any UDP packets for %.4f seconds, maybe your "
+          "firewall is blocking it. Retrying using a tcp connection.",
+          gst_guint64_to_gdouble (src->udp_timeout) / 1000000.0));
 
-  /* unless redirect, open new connection using tcp */
+  /* open new connection using tcp */
   if (gst_rtspsrc_open (src, async) < 0)
     goto open_failed;
 
@@ -5042,8 +5048,14 @@ gst_rtspsrc_loop_send_cmd (GstRTSPSrc * src, gint cmd, gint mask)
   if (old == CMD_RECONNECT) {
     GST_DEBUG_OBJECT (src, "ignore, we were reconnecting");
     cmd = CMD_RECONNECT;
-  }
-  if (old != CMD_WAIT) {
+  } else if (old == CMD_CLOSE) {
+    /* our CMD_CLOSE might have interrutped CMD_LOOP. gst_rtspsrc_loop
+     * will send a CMD_WAIT which would cancel our pending CMD_CLOSE (if
+     * still pending). We just avoid it here by making sure CMD_CLOSE is
+     * still the pending command. */
+    GST_DEBUG_OBJECT (src, "ignore, we were closing");
+    cmd = CMD_CLOSE;
+  } else if (old != CMD_WAIT) {
     src->pending_cmd = CMD_WAIT;
     GST_OBJECT_UNLOCK (src);
     /* cancel previous request */
@@ -5146,131 +5158,6 @@ gst_rtsp_auth_method_to_string (GstRTSPAuthMethod method)
 }
 #endif
 
-static const gchar *
-gst_rtspsrc_skip_lws (const gchar * s)
-{
-  while (g_ascii_isspace (*s))
-    s++;
-  return s;
-}
-
-static const gchar *
-gst_rtspsrc_unskip_lws (const gchar * s, const gchar * start)
-{
-  while (s > start && g_ascii_isspace (*(s - 1)))
-    s--;
-  return s;
-}
-
-static const gchar *
-gst_rtspsrc_skip_commas (const gchar * s)
-{
-  /* The grammar allows for multiple commas */
-  while (g_ascii_isspace (*s) || *s == ',')
-    s++;
-  return s;
-}
-
-static const gchar *
-gst_rtspsrc_skip_item (const gchar * s)
-{
-  gboolean quoted = FALSE;
-  const gchar *start = s;
-
-  /* A list item ends at the last non-whitespace character
-   * before a comma which is not inside a quoted-string. Or at
-   * the end of the string.
-   */
-  while (*s) {
-    if (*s == '"')
-      quoted = !quoted;
-    else if (quoted) {
-      if (*s == '\\' && *(s + 1))
-        s++;
-    } else {
-      if (*s == ',')
-        break;
-    }
-    s++;
-  }
-
-  return gst_rtspsrc_unskip_lws (s, start);
-}
-
-static void
-gst_rtsp_decode_quoted_string (gchar * quoted_string)
-{
-  gchar *src, *dst;
-
-  src = quoted_string + 1;
-  dst = quoted_string;
-  while (*src && *src != '"') {
-    if (*src == '\\' && *(src + 1))
-      src++;
-    *dst++ = *src++;
-  }
-  *dst = '\0';
-}
-
-/* Extract the authentication tokens that the server provided for each method
- * into an array of structures and give those to the connection object.
- */
-static void
-gst_rtspsrc_parse_digest_challenge (GstRTSPConnection * conn,
-    const gchar * header, gboolean * stale)
-{
-  GSList *list = NULL, *iter;
-  const gchar *end;
-  gchar *item, *eq, *name_end, *value;
-
-  g_return_if_fail (stale != NULL);
-
-  gst_rtsp_connection_clear_auth_params (conn);
-  *stale = FALSE;
-
-  /* Parse a header whose content is described by RFC2616 as
-   * "#something", where "something" does not itself contain commas,
-   * except as part of quoted-strings, into a list of allocated strings.
-   */
-  header = gst_rtspsrc_skip_commas (header);
-  while (*header) {
-    end = gst_rtspsrc_skip_item (header);
-    list = g_slist_prepend (list, g_strndup (header, end - header));
-    header = gst_rtspsrc_skip_commas (end);
-  }
-  if (!list)
-    return;
-
-  list = g_slist_reverse (list);
-  for (iter = list; iter; iter = iter->next) {
-    item = iter->data;
-
-    eq = strchr (item, '=');
-    if (eq) {
-      name_end = (gchar *) gst_rtspsrc_unskip_lws (eq, item);
-      if (name_end == item) {
-        /* That's no good... */
-        g_free (item);
-        continue;
-      }
-
-      *name_end = '\0';
-
-      value = (gchar *) gst_rtspsrc_skip_lws (eq + 1);
-      if (*value == '"')
-        gst_rtsp_decode_quoted_string (value);
-    } else
-      value = NULL;
-
-    if (value && strcmp (item, "stale") == 0 && strcmp (value, "TRUE") == 0)
-      *stale = TRUE;
-    gst_rtsp_connection_set_auth_param (conn, item, value);
-    g_free (item);
-  }
-
-  g_slist_free (list);
-}
-
 /* Parse a WWW-Authenticate Response header and determine the
  * available authentication methods
  *
@@ -5280,24 +5167,47 @@ gst_rtspsrc_parse_digest_challenge (GstRTSPConnection * conn,
  * At the moment, for Basic auth, we just do a minimal check and don't
  * even parse out the realm */
 static void
-gst_rtspsrc_parse_auth_hdr (gchar * hdr, GstRTSPAuthMethod * methods,
-    GstRTSPConnection * conn, gboolean * stale)
+gst_rtspsrc_parse_auth_hdr (GstRTSPMessage * response,
+    GstRTSPAuthMethod * methods, GstRTSPConnection * conn, gboolean * stale)
 {
-  gchar *start;
+  GstRTSPAuthCredential **credentials, **credential;
 
-  g_return_if_fail (hdr != NULL);
+  g_return_if_fail (response != NULL);
   g_return_if_fail (methods != NULL);
   g_return_if_fail (stale != NULL);
 
-  /* Skip whitespace at the start of the string */
-  for (start = hdr; start[0] != '\0' && g_ascii_isspace (start[0]); start++);
+  credentials =
+      gst_rtsp_message_parse_auth_credentials (response,
+      GST_RTSP_HDR_WWW_AUTHENTICATE);
+  if (!credentials)
+    return;
 
-  if (g_ascii_strncasecmp (start, "basic", 5) == 0)
-    *methods |= GST_RTSP_AUTH_BASIC;
-  else if (g_ascii_strncasecmp (start, "digest ", 7) == 0) {
-    *methods |= GST_RTSP_AUTH_DIGEST;
-    gst_rtspsrc_parse_digest_challenge (conn, &start[7], stale);
+  credential = credentials;
+  while (*credential) {
+    if ((*credential)->scheme == GST_RTSP_AUTH_BASIC) {
+      *methods |= GST_RTSP_AUTH_BASIC;
+    } else if ((*credential)->scheme == GST_RTSP_AUTH_DIGEST) {
+      GstRTSPAuthParam **param = (*credential)->params;
+
+      *methods |= GST_RTSP_AUTH_DIGEST;
+
+      gst_rtsp_connection_clear_auth_params (conn);
+      *stale = FALSE;
+
+      while (*param) {
+        if (strcmp ((*param)->name, "stale") == 0
+            && g_ascii_strcasecmp ((*param)->value, "TRUE") == 0)
+          *stale = TRUE;
+        gst_rtsp_connection_set_auth_param (conn, (*param)->name,
+            (*param)->value);
+        param++;
+      }
+    }
+
+    credential++;
   }
+
+  gst_rtsp_auth_credentials_free (credentials);
 }
 
 /**
@@ -5324,16 +5234,12 @@ gst_rtspsrc_setup_auth (GstRTSPSrc * src, GstRTSPMessage * response)
   GstRTSPResult auth_result;
   GstRTSPUrl *url;
   GstRTSPConnection *conn;
-  gchar *hdr;
   gboolean stale = FALSE;
 
   conn = src->conninfo.connection;
 
   /* Identify the available auth methods and see if any are supported */
-  if (gst_rtsp_message_get_header (response, GST_RTSP_HDR_WWW_AUTHENTICATE,
-          &hdr, 0) == GST_RTSP_OK) {
-    gst_rtspsrc_parse_auth_hdr (hdr, &avail_methods, conn, &stale);
-  }
+  gst_rtspsrc_parse_auth_hdr (response, &avail_methods, conn, &stale);
 
   if (avail_methods == GST_RTSP_AUTH_NONE)
     goto no_auth_available;
@@ -5668,7 +5574,6 @@ error_response:
           src->conninfo.url->transports = transports;
 
         src->need_redirect = TRUE;
-        src->state = GST_RTSP_STATE_INIT;
         res = GST_RTSP_OK;
         break;
       }
@@ -6667,7 +6572,7 @@ gst_rtspsrc_open_from_sdp (GstRTSPSrc * src, GstSDPMessage * sdp,
   /* create streams */
   n_streams = gst_sdp_message_medias_len (sdp);
   for (i = 0; i < n_streams; i++) {
-    gst_rtspsrc_create_stream (src, sdp, i);
+    gst_rtspsrc_create_stream (src, sdp, i, n_streams);
   }
 
   src->state = GST_RTSP_STATE_INIT;
@@ -6763,7 +6668,7 @@ restart:
               NULL)) < 0)
     goto send_error;
 
-  /* we only perform redirect for the describe, currently */
+  /* we only perform redirect for describe and play, currently */
   if (src->need_redirect) {
     /* close connection, we don't have to send a TEARDOWN yet, ignore the
      * result. */
@@ -7249,6 +7154,7 @@ gst_rtspsrc_play (GstRTSPSrc * src, GstSegment * segment, gboolean async)
 
   GST_DEBUG_OBJECT (src, "PLAY...");
 
+restart:
   if ((res = gst_rtspsrc_ensure_open (src, async)) < 0)
     goto open_failed;
 
@@ -7320,6 +7226,18 @@ gst_rtspsrc_play (GstRTSPSrc * src, GstSegment * segment, gboolean async)
 
     if ((res = gst_rtspsrc_send (src, conn, &request, &response, NULL)) < 0)
       goto send_error;
+
+    if (src->need_redirect) {
+      GST_DEBUG_OBJECT (src,
+          "redirect: tearing down and restarting with new url");
+      /* teardown and restart with new url */
+      gst_rtspsrc_close (src, TRUE, FALSE);
+      /* reset protocols to force re-negotiation with redirected url */
+      src->cur_protocols = src->protocols;
+      gst_rtsp_message_unset (&request);
+      gst_rtsp_message_unset (&response);
+      goto restart;
+    }
 
     /* seek may have silently failed as it is not supported */
     if (!(src->methods & GST_RTSP_PLAY)) {
@@ -7834,7 +7752,7 @@ gst_rtspsrc_change_state (GstElement * element, GstStateChange transition)
       ret = GST_STATE_CHANGE_NO_PREROLL;
       break;
     case GST_STATE_CHANGE_PAUSED_TO_READY:
-      gst_rtspsrc_loop_send_cmd (rtspsrc, CMD_CLOSE, CMD_PAUSE);
+      gst_rtspsrc_loop_send_cmd (rtspsrc, CMD_CLOSE, CMD_ALL);
       ret = GST_STATE_CHANGE_SUCCESS;
       break;
     case GST_STATE_CHANGE_READY_TO_NULL:

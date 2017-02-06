@@ -128,7 +128,7 @@
 
 /* Required for other parts of in_pktinfo / in6_pktinfo but only
  * on non-Windows and can be included after glib.h */
-#ifndef G_OS_WIN32
+#ifndef G_PLATFORM_WIN32
 #include <netinet/ip.h>
 #endif
 
@@ -157,7 +157,7 @@ struct _GstIPPktinfoMessage
   GSocketControlMessage parent;
 
   guint ifindex;
-#ifndef G_OS_WIN32
+#ifndef G_PLATFORM_WIN32
 #ifndef __NetBSD__
   struct in_addr spec_dst;
 #endif
@@ -203,7 +203,7 @@ gst_ip_pktinfo_message_deserialize (gint level,
 
   message = g_object_new (GST_TYPE_IP_PKTINFO_MESSAGE, NULL);
   message->ifindex = pktinfo->ipi_ifindex;
-#ifndef G_OS_WIN32
+#ifndef G_PLATFORM_WIN32
 #ifndef __NetBSD__
   message->spec_dst = pktinfo->ipi_spec_dst;
 #endif
@@ -522,7 +522,8 @@ gst_udpsrc_class_init (GstUDPSrcClass * klass)
 #endif
   g_object_class_install_property (gobject_class, PROP_MULTICAST_IFACE,
       g_param_spec_string ("multicast-iface", "Multicast Interface",
-          "The network interface on which to join the multicast group",
+          "The network interface on which to join the multicast group."
+          "This allows multiple interfaces seperated by comma. (\"eth0,eth1\")",
           UDP_DEFAULT_MULTICAST_IFACE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (gobject_class, PROP_URI,
@@ -847,6 +848,7 @@ gst_udpsrc_create (GstPushSrc * psrc, GstBuffer ** buf)
   gssize res;
   gsize offset;
   GSocketControlMessage **msgs = NULL;
+  GSocketControlMessage ***p_msgs;
   gint n_msgs = 0, i;
 
   udpsrc = GST_UDPSRC_CAST (psrc);
@@ -854,10 +856,19 @@ gst_udpsrc_create (GstPushSrc * psrc, GstBuffer ** buf)
   if (!gst_udpsrc_ensure_mem (udpsrc))
     goto memory_alloc_error;
 
+  /* optimization: use messages only in multicast mode */
+  p_msgs =
+      (g_inet_address_get_is_multicast (g_inet_socket_address_get_address
+          (udpsrc->addr))) ? &msgs : NULL;
+
   /* Retrieve sender address unless we've been configured not to do so */
   p_saddr = (udpsrc->retrieve_sender_address) ? &saddr : NULL;
 
 retry:
+  if (saddr != NULL) {
+    g_object_unref (saddr);
+    saddr = NULL;
+  }
 
   do {
     gint64 timeout;
@@ -891,14 +902,9 @@ retry:
     }
   } while (G_UNLIKELY (try_again));
 
-  if (saddr != NULL) {
-    g_object_unref (saddr);
-    saddr = NULL;
-  }
-
   res =
       g_socket_receive_message (udpsrc->used_socket, p_saddr, udpsrc->vec, 2,
-      &msgs, &n_msgs, &flags, udpsrc->cancellable, &err);
+      p_msgs, &n_msgs, &flags, udpsrc->cancellable, &err);
 
   if (G_UNLIKELY (res < 0)) {
     /* G_IO_ERROR_HOST_UNREACHABLE for a UDP socket means that a packet sent
@@ -923,44 +929,40 @@ retry:
 
   /* Retry if multicast and the destination address is not ours. We don't want
    * to receive arbitrary packets */
-  {
+  if (p_msgs) {
     GInetAddress *iaddr = g_inet_socket_address_get_address (udpsrc->addr);
     gboolean skip_packet = FALSE;
     gsize iaddr_size = g_inet_address_get_native_size (iaddr);
     const guint8 *iaddr_bytes = g_inet_address_to_bytes (iaddr);
 
-    if (g_inet_address_get_is_multicast (iaddr)) {
-
-      for (i = 0; i < n_msgs && !skip_packet; i++) {
+    for (i = 0; i < n_msgs && !skip_packet; i++) {
 #ifdef IP_PKTINFO
-        if (GST_IS_IP_PKTINFO_MESSAGE (msgs[i])) {
-          GstIPPktinfoMessage *msg = GST_IP_PKTINFO_MESSAGE (msgs[i]);
+      if (GST_IS_IP_PKTINFO_MESSAGE (msgs[i])) {
+        GstIPPktinfoMessage *msg = GST_IP_PKTINFO_MESSAGE (msgs[i]);
 
-          if (sizeof (msg->addr) == iaddr_size
-              && memcmp (iaddr_bytes, &msg->addr, sizeof (msg->addr)))
-            skip_packet = TRUE;
-        }
+        if (sizeof (msg->addr) == iaddr_size
+            && memcmp (iaddr_bytes, &msg->addr, sizeof (msg->addr)))
+          skip_packet = TRUE;
+      }
 #endif
 #ifdef IPV6_PKTINFO
-        if (GST_IS_IPV6_PKTINFO_MESSAGE (msgs[i])) {
-          GstIPV6PktinfoMessage *msg = GST_IPV6_PKTINFO_MESSAGE (msgs[i]);
+      if (GST_IS_IPV6_PKTINFO_MESSAGE (msgs[i])) {
+        GstIPV6PktinfoMessage *msg = GST_IPV6_PKTINFO_MESSAGE (msgs[i]);
 
-          if (sizeof (msg->addr) == iaddr_size
-              && memcmp (iaddr_bytes, &msg->addr, sizeof (msg->addr)))
-            skip_packet = TRUE;
-        }
+        if (sizeof (msg->addr) == iaddr_size
+            && memcmp (iaddr_bytes, &msg->addr, sizeof (msg->addr)))
+          skip_packet = TRUE;
+      }
 #endif
 #ifdef IP_RECVDSTADDR
-        if (GST_IS_IP_RECVDSTADDR_MESSAGE (msgs[i])) {
-          GstIPRecvdstaddrMessage *msg = GST_IP_RECVDSTADDR_MESSAGE (msgs[i]);
+      if (GST_IS_IP_RECVDSTADDR_MESSAGE (msgs[i])) {
+        GstIPRecvdstaddrMessage *msg = GST_IP_RECVDSTADDR_MESSAGE (msgs[i]);
 
-          if (sizeof (msg->addr) == iaddr_size
-              && memcmp (iaddr_bytes, &msg->addr, sizeof (msg->addr)))
-            skip_packet = TRUE;
-        }
-#endif
+        if (sizeof (msg->addr) == iaddr_size
+            && memcmp (iaddr_bytes, &msg->addr, sizeof (msg->addr)))
+          skip_packet = TRUE;
       }
-
+#endif
     }
 
     for (i = 0; i < n_msgs; i++) {
@@ -971,12 +973,6 @@ retry:
     if (skip_packet) {
       GST_DEBUG_OBJECT (udpsrc,
           "Dropping packet for a different multicast address");
-
-      if (saddr != NULL) {
-        g_object_unref (saddr);
-        saddr = NULL;
-      }
-
       goto retry;
     }
   }
@@ -1435,11 +1431,30 @@ gst_udpsrc_open (GstUDPSrc * src)
       &&
       g_inet_address_get_is_multicast (g_inet_socket_address_get_address
           (src->addr))) {
-    GST_DEBUG_OBJECT (src, "joining multicast group %s", src->address);
-    if (!g_socket_join_multicast_group (src->used_socket,
-            g_inet_socket_address_get_address (src->addr),
-            FALSE, src->multi_iface, &err))
-      goto membership;
+
+    if (src->multi_iface) {
+      GStrv multi_ifaces = g_strsplit (src->multi_iface, ",", -1);
+      gchar **ifaces = multi_ifaces;
+      while (*ifaces) {
+        g_strstrip (*ifaces);
+        GST_DEBUG_OBJECT (src, "joining multicast group %s interface %s",
+            src->address, *ifaces);
+        if (!g_socket_join_multicast_group (src->used_socket,
+                g_inet_socket_address_get_address (src->addr),
+                FALSE, *ifaces, &err)) {
+          g_strfreev (multi_ifaces);
+          goto membership;
+        }
+
+        ifaces++;
+      }
+      g_strfreev (multi_ifaces);
+    } else {
+      GST_DEBUG_OBJECT (src, "joining multicast group %s", src->address);
+      if (!g_socket_join_multicast_group (src->used_socket,
+              g_inet_socket_address_get_address (src->addr), FALSE, NULL, &err))
+        goto membership;
+    }
 
     if (g_inet_address_get_family (g_inet_socket_address_get_address
             (src->addr)) == G_SOCKET_FAMILY_IPV4) {
@@ -1594,14 +1609,33 @@ gst_udpsrc_close (GstUDPSrc * src)
             (src->addr))) {
       GError *err = NULL;
 
-      GST_DEBUG_OBJECT (src, "leaving multicast group %s", src->address);
+      if (src->multi_iface) {
+        GStrv multi_ifaces = g_strsplit (src->multi_iface, ",", -1);
+        gchar **ifaces = multi_ifaces;
+        while (*ifaces) {
+          g_strstrip (*ifaces);
+          GST_DEBUG_OBJECT (src, "leaving multicast group %s interface %s",
+              src->address, *ifaces);
+          if (!g_socket_leave_multicast_group (src->used_socket,
+                  g_inet_socket_address_get_address (src->addr),
+                  FALSE, *ifaces, &err)) {
+            GST_ERROR_OBJECT (src, "Failed to leave multicast group: %s",
+                err->message);
+            g_clear_error (&err);
+          }
+          ifaces++;
+        }
+        g_strfreev (multi_ifaces);
 
-      if (!g_socket_leave_multicast_group (src->used_socket,
-              g_inet_socket_address_get_address (src->addr), FALSE,
-              src->multi_iface, &err)) {
-        GST_ERROR_OBJECT (src, "Failed to leave multicast group: %s",
-            err->message);
-        g_clear_error (&err);
+      } else {
+        GST_DEBUG_OBJECT (src, "leaving multicast group %s", src->address);
+        if (!g_socket_leave_multicast_group (src->used_socket,
+                g_inet_socket_address_get_address (src->addr), FALSE,
+                NULL, &err)) {
+          GST_ERROR_OBJECT (src, "Failed to leave multicast group: %s",
+              err->message);
+          g_clear_error (&err);
+        }
       }
     }
 

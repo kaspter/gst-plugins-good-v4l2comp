@@ -298,7 +298,6 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
   /* first see what is possible on our source pad */
   thiscaps = gst_pad_query_caps (GST_BASE_SRC_PAD (basesrc), NULL);
   GST_DEBUG_OBJECT (basesrc, "caps of src: %" GST_PTR_FORMAT, thiscaps);
-  LOG_CAPS (basesrc, thiscaps);
 
   /* nothing or anything is allowed, we're done */
   if (thiscaps == NULL || gst_caps_is_any (thiscaps))
@@ -307,8 +306,6 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
   /* get the peer caps without a filter as we'll filter ourselves later on */
   peercaps = gst_pad_peer_query_caps (GST_BASE_SRC_PAD (basesrc), NULL);
   GST_DEBUG_OBJECT (basesrc, "caps of peer: %" GST_PTR_FORMAT, peercaps);
-  LOG_CAPS (basesrc, peercaps);
-
   if (peercaps && !gst_caps_is_any (peercaps)) {
     GstCaps *icaps = NULL;
 
@@ -317,7 +314,6 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
         GST_CAPS_INTERSECT_FIRST);
 
     GST_DEBUG_OBJECT (basesrc, "intersect: %" GST_PTR_FORMAT, icaps);
-    LOG_CAPS (basesrc, icaps);
     if (icaps) {
       /* If there are multiple intersections pick the one with the smallest
        * resolution strictly bigger then the first peer caps */
@@ -369,7 +365,6 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
     if (!gst_caps_is_empty (caps)) {
       caps = gst_v4l2src_fixate (basesrc, caps);
       GST_DEBUG_OBJECT (basesrc, "fixated to: %" GST_PTR_FORMAT, caps);
-      LOG_CAPS (basesrc, caps);
 
       if (gst_caps_is_any (caps)) {
         /* hmm, still anything, so element can do anything and
@@ -873,6 +868,7 @@ alloc_failed:
   }
 error:
   {
+    gst_buffer_replace (buf, NULL);
     if (ret == GST_V4L2_FLOW_LAST_BUFFER) {
       GST_ELEMENT_ERROR (src, RESOURCE, FAILED,
           ("Driver returned a buffer with no payload, this most likely "

@@ -528,6 +528,10 @@ gst_v4l2_object_destroy (GstV4l2Object * v4l2object)
     gst_caps_unref (v4l2object->probed_caps);
   }
 
+  if (v4l2object->extra_controls) {
+    gst_structure_free (v4l2object->extra_controls);
+  }
+
   g_free (v4l2object);
 }
 
@@ -2176,8 +2180,12 @@ gst_v4l2_object_add_interlace_mode (GstV4l2Object * v4l2object,
     gst_value_list_append_and_take_value (&interlace_formats, &interlace_enum);
   }
 
-  gst_v4l2src_value_simplify (&interlace_formats);
-  gst_structure_take_value (s, "interlace-mode", &interlace_formats);
+  if (gst_v4l2src_value_simplify (&interlace_formats)
+      || gst_value_list_get_size (&interlace_formats) > 0)
+    gst_structure_take_value (s, "interlace-mode", &interlace_formats);
+  else
+    GST_WARNING_OBJECT (v4l2object, "Failed to determine interlace mode");
+
   return;
 }
 
@@ -3910,7 +3918,6 @@ gst_v4l2_object_get_caps (GstV4l2Object * v4l2object, GstCaps * filter)
   }
 
   GST_INFO_OBJECT (v4l2object->element, "probed caps: %" GST_PTR_FORMAT, ret);
-  LOG_CAPS (v4l2object->element, ret);
 
   return ret;
 }
