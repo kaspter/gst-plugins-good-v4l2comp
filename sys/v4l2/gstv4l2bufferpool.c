@@ -716,7 +716,7 @@ gst_v4l2_buffer_pool_start (GstBufferPool * bpool)
        * poll before that will always fail. Doing an empty read, forces the
        * queue to be initialized now. We only do this if we have a streaming
        * driver. */
-      if (obj->vcap.capabilities & V4L2_CAP_STREAMING)
+      if (obj->device_caps & V4L2_CAP_STREAMING)
         v4l2_read (obj->video_fd, NULL, 0);
 #endif
       break;
@@ -851,7 +851,7 @@ no_buffers:
   }
 start_failed:
   {
-    GST_ERROR_OBJECT (pool, "allocate failed");
+    GST_ERROR_OBJECT (pool, "failed to start streaming");
     return FALSE;
   }
 other_pool_failed:
@@ -940,6 +940,7 @@ gst_v4l2_buffer_pool_flush_stop (GstBufferPool * bpool)
 {
   GstV4l2BufferPool *pool = GST_V4L2_BUFFER_POOL (bpool);
   GstV4l2Object *obj = pool->obj;
+  GstBuffer *buffers[VIDEO_MAX_FRAME];
   gint i;
 
   GST_DEBUG_OBJECT (pool, "stop flushing");
@@ -951,7 +952,12 @@ gst_v4l2_buffer_pool_flush_stop (GstBufferPool * bpool)
   if (pool->other_pool)
     gst_buffer_pool_set_flushing (pool->other_pool, FALSE);
 
+  GST_OBJECT_LOCK (pool);
   gst_v4l2_buffer_pool_streamoff (pool);
+  /* Remember buffers to re-enqueue */
+  memcpy (buffers, pool->buffers, sizeof (buffers));
+  memset (pool->buffers, 0, sizeof (pool->buffers));
+  GST_OBJECT_UNLOCK (pool);
 
   /* Reset our state */
   switch (obj->mode) {
@@ -964,11 +970,9 @@ gst_v4l2_buffer_pool_flush_stop (GstBufferPool * bpool)
     {
       for (i = 0; i < VIDEO_MAX_FRAME; i++) {
         /* Re-enqueue buffers */
-        if (pool->buffers[i]) {
+        if (buffers[i]) {
           GstBufferPool *bpool = (GstBufferPool *) pool;
-          GstBuffer *buffer = pool->buffers[i];
-
-          pool->buffers[i] = NULL;
+          GstBuffer *buffer = buffers[i];
 
           /* Remove qdata, this will unmap any map data in
            * userptr/dmabuf-import */
@@ -1077,9 +1081,6 @@ gst_v4l2_buffer_pool_qbuf (GstV4l2BufferPool * pool, GstBuffer * buf)
 
   GST_LOG_OBJECT (pool, "queuing buffer %i", index);
 
-  g_atomic_int_inc (&pool->num_queued);
-  pool->buffers[index] = buf;
-
   if (V4L2_TYPE_IS_OUTPUT (obj->type)) {
     enum v4l2_field field;
 
@@ -1107,10 +1108,13 @@ gst_v4l2_buffer_pool_qbuf (GstV4l2BufferPool * pool, GstBuffer * buf)
     GST_TIME_TO_TIMEVAL (timestamp, group->buffer.timestamp);
   }
 
+  GST_OBJECT_LOCK (pool);
+  g_atomic_int_inc (&pool->num_queued);
+  pool->buffers[index] = buf;
+
   if (!gst_v4l2_allocator_qbuf (pool->vallocator, group))
     goto queue_failed;
 
-  GST_OBJECT_LOCK (pool);
   pool->empty = FALSE;
   g_cond_signal (&pool->empty_cond);
   GST_OBJECT_UNLOCK (pool);
@@ -1129,6 +1133,7 @@ queue_failed:
     GST_BUFFER_FLAG_SET (buf, GST_BUFFER_FLAG_TAG_MEMORY);
     g_atomic_int_add (&pool->num_queued, -1);
     pool->buffers[index] = NULL;
+    GST_OBJECT_UNLOCK (pool);
     return GST_FLOW_ERROR;
   }
 }
@@ -1703,8 +1708,6 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
 
   GST_DEBUG_OBJECT (pool, "process buffer %p", buf);
 
-  g_return_val_if_fail (gst_buffer_pool_is_active (bpool), GST_FLOW_ERROR);
-
   if (GST_BUFFER_POOL_IS_FLUSHING (pool))
     return GST_FLOW_FLUSHING;
 
@@ -1725,12 +1728,21 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
 
           if ((*buf)->pool == bpool) {
             guint num_queued;
+            gsize size = gst_buffer_get_size (*buf);
 
-            if (gst_buffer_get_size (*buf) == 0) {
+            if (size == 0) {
               if (GST_BUFFER_FLAG_IS_SET (*buf, GST_BUFFER_FLAG_CORRUPTED))
                 goto buffer_corrupted;
               else
                 goto eos;
+            }
+
+            /* verify that buffer contains a full frame for raw video */
+            if (GST_VIDEO_INFO_FORMAT (&obj->info) != GST_VIDEO_FORMAT_ENCODED
+                && size < GST_VIDEO_INFO_SIZE (&obj->info)) {
+              GST_WARNING_OBJECT (pool, "Invalid buffer size, this is likely "
+                  "due to a bug in your driver, dropping");
+              goto buffer_corrupted;
             }
 
             num_queued = g_atomic_int_get (&pool->num_queued);
@@ -1856,7 +1868,6 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf)
 
           GST_LOG_OBJECT (pool, "processing buffer %i from our pool", index);
 
-          index = group->buffer.index;
           if (pool->buffers[index] != NULL) {
             GST_LOG_OBJECT (pool, "buffer %i already queued, copying", index);
             goto copying;

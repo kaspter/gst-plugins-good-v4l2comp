@@ -101,8 +101,9 @@ void gst_splitmux_part_reader_set_location (GstSplitMuxPartReader *reader,
     const gchar *path);
 gboolean gst_splitmux_part_is_eos (GstSplitMuxPartReader *reader);
 
-gboolean gst_splitmux_part_reader_activate (GstSplitMuxPartReader *part, GstSegment *seg);
+gboolean gst_splitmux_part_reader_activate (GstSplitMuxPartReader *part, GstSegment *seg, GstSeekFlags extra_flags);
 void gst_splitmux_part_reader_deactivate (GstSplitMuxPartReader *part);
+gboolean gst_splitmux_part_reader_is_active (GstSplitMuxPartReader *part);
 
 gboolean gst_splitmux_part_reader_src_query (GstSplitMuxPartReader *part, GstPad *src_pad, GstQuery * query);
 void gst_splitmux_part_reader_set_start_offset (GstSplitMuxPartReader *part, GstClockTime offset);

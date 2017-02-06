@@ -72,8 +72,8 @@ static GstStaticPadTemplate sink_templ = GST_STATIC_PAD_TEMPLATE ("sink",
 
 #ifndef GST_DISABLE_GST_DEBUG
 static const char *const snap_types[2][2] = {
-  {"any", "before"},
-  {"after", "nearest"},
+  {"any", "after"},
+  {"before", "nearest"},
 };
 #endif
 
@@ -98,7 +98,8 @@ static gboolean gst_avi_demux_handle_src_query (GstPad * pad,
 static gboolean gst_avi_demux_src_convert (GstPad * pad, GstFormat src_format,
     gint64 src_value, GstFormat * dest_format, gint64 * dest_value);
 
-static gboolean gst_avi_demux_do_seek (GstAviDemux * avi, GstSegment * segment);
+static gboolean gst_avi_demux_do_seek (GstAviDemux * avi, GstSegment * segment,
+    GstSeekFlags flags);
 static gboolean gst_avi_demux_handle_seek (GstAviDemux * avi, GstPad * pad,
     GstEvent * event);
 static gboolean gst_avi_demux_handle_seek_push (GstAviDemux * avi, GstPad * pad,
@@ -123,6 +124,9 @@ static void gst_avi_demux_get_buffer_info (GstAviDemux * avi,
 
 static void gst_avi_demux_parse_idit (GstAviDemux * avi, GstBuffer * buf);
 static void gst_avi_demux_parse_strd (GstAviDemux * avi, GstBuffer * buf);
+
+static void parse_tag_value (GstAviDemux * avi, GstTagList * taglist,
+    const gchar * type, guint8 * ptr, guint tsize);
 
 /* GObject methods */
 
@@ -171,6 +175,11 @@ gst_avi_demux_class_init (GstAviDemuxClass * klass)
   gst_element_class_add_pad_template (gstelement_class, subsrctempl);
   gst_element_class_add_pad_template (gstelement_class, subpicsrctempl);
   gst_element_class_add_static_pad_template (gstelement_class, &sink_templ);
+
+  gst_caps_unref (audcaps);
+  gst_caps_unref (vidcaps);
+  gst_caps_unref (subcaps);
+  gst_caps_unref (subpiccaps);
 
   gst_element_class_set_static_metadata (gstelement_class, "Avi demuxer",
       "Codec/Demuxer",
@@ -924,11 +933,6 @@ gst_avi_demux_handle_src_event (GstPad * pad, GstObject * parent,
       } else {
         res = gst_avi_demux_handle_seek_push (avi, pad, event);
       }
-      gst_event_unref (event);
-      break;
-    case GST_EVENT_QOS:
-    case GST_EVENT_NAVIGATION:
-      res = FALSE;
       gst_event_unref (event);
       break;
     default:
@@ -1941,6 +1945,7 @@ gst_avi_demux_check_caps (GstAviDemux * avi, GstAviStream * stream,
   s = gst_caps_get_structure (caps, 0);
   if (gst_structure_has_name (s, "video/x-raw")) {
     stream->is_raw = TRUE;
+    stream->alignment = 32;
     if (!gst_structure_has_field (s, "pixel-aspect-ratio"))
       gst_structure_set (s, "pixel-aspect-ratio", GST_TYPE_FRACTION,
           1, 1, NULL);
@@ -2215,16 +2220,19 @@ gst_avi_demux_parse_stream (GstAviDemux * avi, GstBuffer * buf)
         g_free (stream->name);
 
         gst_buffer_map (sub, &map, GST_MAP_READ);
-        stream->name = g_strndup ((gchar *) map.data, map.size);
-        gst_buffer_unmap (sub, &map);
-        gst_buffer_unref (sub);
-        sub = NULL;
 
         if (avi->globaltags == NULL)
           avi->globaltags = gst_tag_list_new_empty ();
-        gst_tag_list_add (avi->globaltags, GST_TAG_MERGE_REPLACE,
-            GST_TAG_TITLE, stream->name, NULL);
-        GST_DEBUG_OBJECT (avi, "stream name: %s", stream->name);
+        parse_tag_value (avi, avi->globaltags, GST_TAG_TITLE,
+            map.data, map.size);
+
+        if (gst_tag_list_get_string (avi->globaltags, GST_TAG_TITLE,
+                &stream->name))
+          GST_DEBUG_OBJECT (avi, "stream name: %s", stream->name);
+
+        gst_buffer_unmap (sub, &map);
+        gst_buffer_unref (sub);
+        sub = NULL;
         break;
       case GST_RIFF_IDIT:
         gst_avi_demux_parse_idit (avi, sub);
@@ -2306,9 +2314,6 @@ gst_avi_demux_parse_stream (GstAviDemux * avi, GstBuffer * buf)
           if (n && d)
             gst_caps_set_simple (caps, "pixel-aspect-ratio", GST_TYPE_FRACTION,
                 n, d, NULL);
-          /* very local, not needed elsewhere */
-          g_free (vprp);
-          vprp = NULL;
         }
         caps = gst_avi_demux_check_caps (avi, stream, caps);
         tag_name = GST_TAG_VIDEO_CODEC;
@@ -2455,6 +2460,8 @@ gst_avi_demux_parse_stream (GstAviDemux * avi, GstBuffer * buf)
     gst_tag_list_add (stream->taglist, GST_TAG_MERGE_APPEND, tag_name,
         codec_name, NULL);
   }
+
+  g_free (vprp);
   g_free (codec_name);
   gst_buffer_unref (buf);
 
@@ -2606,8 +2613,9 @@ gst_avi_demux_index_entry_search (GstAviIndexEntry * entry, guint64 * total)
  * @avi: Avi object
  * @stream: the stream
  * @time: a time position
+ * @next: whether to look for entry before or after @time
  *
- * Finds the index entry which time is less or equal than the requested time.
+ * Finds the index entry which time is less/more or equal than the requested time.
  * Try to avoid binary search when we can convert the time to an index
  * position directly (for example for video frames with a fixed duration).
  *
@@ -2615,7 +2623,7 @@ gst_avi_demux_index_entry_search (GstAviIndexEntry * entry, guint64 * total)
  */
 static guint
 gst_avi_demux_index_for_time (GstAviDemux * avi,
-    GstAviStream * stream, guint64 time)
+    GstAviStream * stream, guint64 time, gboolean next)
 {
   guint index = -1;
   guint64 total;
@@ -2636,6 +2644,14 @@ gst_avi_demux_index_for_time (GstAviDemux * avi,
       total = avi_stream_convert_time_to_frames_unchecked (stream, time);
     } else {
       index = avi_stream_convert_time_to_frames_unchecked (stream, time);
+      /* this entry typically undershoots the target time,
+       * so check a bit more if next needed */
+      if (next) {
+        GstClockTime itime =
+            avi_stream_convert_frames_to_time_unchecked (stream, index);
+        if (itime < time && index + 1 < stream->idx_n)
+          index++;
+      }
     }
   } else if (stream->strh->type == GST_RIFF_FCC_auds) {
     /* constant rate stream */
@@ -2653,7 +2669,7 @@ gst_avi_demux_index_for_time (GstAviDemux * avi,
     entry = gst_util_array_binary_search (stream->index,
         stream->idx_n, sizeof (GstAviIndexEntry),
         (GCompareDataFunc) gst_avi_demux_index_entry_search,
-        GST_SEARCH_MODE_BEFORE, &total, NULL);
+        next ? GST_SEARCH_MODE_AFTER : GST_SEARCH_MODE_BEFORE, &total, NULL);
 
     if (entry == NULL) {
       GST_LOG_OBJECT (avi, "not found, assume index 0");
@@ -3808,8 +3824,9 @@ gst_avi_demux_parse_strd (GstAviDemux * avi, GstBuffer * buf)
           avi->globaltags = gst_tag_list_new_empty ();
 
         gst_tag_list_add (avi->globaltags, GST_TAG_MERGE_APPEND,
-            GST_TAG_DEVICE_MANUFACTURER, "FUJIFILM",
-            GST_TAG_DEVICE_MODEL, ptr, NULL);
+            GST_TAG_DEVICE_MANUFACTURER, "FUJIFILM", NULL);
+        parse_tag_value (avi, avi->globaltags, GST_TAG_DEVICE_MODEL, ptr,
+            sub_size);
 
         while (ptr[sub_size] == '\0' && sub_size < left)
           sub_size++;
@@ -3895,6 +3912,10 @@ gst_avi_demux_parse_ncdt (GstAviDemux * avi, GstBuffer * buf,
 
           tsize -= 4;
           ptr += 4;
+          left -= 4;
+
+          if (sub_size > tsize)
+            break;
 
           GST_DEBUG_OBJECT (avi, "sub-tag %u, size %u", sub_tag, sub_size);
           /* http://www.sno.phy.queensu.ca/~phil/exiftool/TagNames/Nikon.html#NCTG
@@ -3913,10 +3934,12 @@ gst_avi_demux_parse_ncdt (GstAviDemux * avi, GstBuffer * buf,
               break;
             case 0x13:         /* CreationDate */
               type = GST_TAG_DATE_TIME;
-              if (ptr[4] == ':')
-                ptr[4] = '-';
-              if (ptr[7] == ':')
-                ptr[7] = '-';
+              if (left > 7) {
+                if (ptr[4] == ':')
+                  ptr[4] = '-';
+                if (ptr[7] == ':')
+                  ptr[7] = '-';
+              }
               break;
             default:
               type = NULL;
@@ -3930,6 +3953,7 @@ gst_avi_demux_parse_ncdt (GstAviDemux * avi, GstBuffer * buf,
 
           ptr += sub_size;
           tsize -= sub_size;
+          left -= sub_size;
         }
         break;
       default:
@@ -4305,7 +4329,7 @@ skipping_done:
   gst_avi_demux_expose_streams (avi, FALSE);
 
   /* do initial seek to the default segment values */
-  gst_avi_demux_do_seek (avi, &avi->segment);
+  gst_avi_demux_do_seek (avi, &avi->segment, 0);
 
   /* create initial NEWSEGMENT event */
   if (avi->seg_event)
@@ -4437,17 +4461,19 @@ gst_avi_demux_move_stream (GstAviDemux * avi, GstAviStream * stream,
  * Do the actual seeking.
  */
 static gboolean
-gst_avi_demux_do_seek (GstAviDemux * avi, GstSegment * segment)
+gst_avi_demux_do_seek (GstAviDemux * avi, GstSegment * segment,
+    GstSeekFlags flags)
 {
   GstClockTime seek_time;
   gboolean keyframe, before, after;
   guint i, index;
   GstAviStream *stream;
+  gboolean next;
 
   seek_time = segment->position;
-  keyframe = ! !(segment->flags & GST_SEEK_FLAG_KEY_UNIT);
-  before = ! !(segment->flags & GST_SEEK_FLAG_SNAP_BEFORE);
-  after = ! !(segment->flags & GST_SEEK_FLAG_SNAP_AFTER);
+  keyframe = ! !(flags & GST_SEEK_FLAG_KEY_UNIT);
+  before = ! !(flags & GST_SEEK_FLAG_SNAP_BEFORE);
+  after = ! !(flags & GST_SEEK_FLAG_SNAP_AFTER);
 
   GST_DEBUG_OBJECT (avi, "seek to: %" GST_TIME_FORMAT
       " keyframe seeking:%d, %s", GST_TIME_ARGS (seek_time), keyframe,
@@ -4457,20 +4483,18 @@ gst_avi_demux_do_seek (GstAviDemux * avi, GstSegment * segment)
    * which is mostly correct... */
   stream = &avi->stream[avi->main_stream];
 
+  next = after && !before;
+  if (segment->rate < 0)
+    next = !next;
+
   /* get the entry index for the requested position */
-  index = gst_avi_demux_index_for_time (avi, stream, seek_time);
+  index = gst_avi_demux_index_for_time (avi, stream, seek_time, next);
   GST_DEBUG_OBJECT (avi, "Got entry %u", index);
   if (index == -1)
     return FALSE;
 
   /* check if we are already on a keyframe */
   if (!ENTRY_IS_KEYFRAME (&stream->index[index])) {
-    gboolean next;
-
-    next = after && !before;
-    if (segment->rate < 0)
-      next = !next;
-
     if (next) {
       GST_DEBUG_OBJECT (avi, "not keyframe, searching forward");
       /* now go to the next keyframe, this is where we should start
@@ -4495,13 +4519,15 @@ gst_avi_demux_do_seek (GstAviDemux * avi, GstSegment * segment)
     seek_time = stream->current_timestamp;
     GST_DEBUG_OBJECT (avi, "keyframe adjusted to %" GST_TIME_FORMAT,
         GST_TIME_ARGS (seek_time));
+    /* the seek time is always the position ... */
+    segment->position = seek_time;
+    /* ... and start and stream time when going forwards,
+     * otherwise only stop time */
+    if (segment->rate > 0.0)
+      segment->start = segment->time = seek_time;
+    else
+      segment->stop = seek_time;
   }
-
-  /* the seek time is also the position and stream time when going
-   * forwards */
-  segment->position = seek_time;
-  if (segment->rate > 0.0)
-    segment->time = seek_time;
 
   /* now set DISCONT and align the other streams */
   for (i = 0; i < avi->num_streams; i++) {
@@ -4512,7 +4538,7 @@ gst_avi_demux_do_seek (GstAviDemux * avi, GstSegment * segment)
       continue;
 
     /* get the entry index for the requested position */
-    index = gst_avi_demux_index_for_time (avi, ostream, seek_time);
+    index = gst_avi_demux_index_for_time (avi, ostream, seek_time, FALSE);
     if (index == -1)
       continue;
 
@@ -4612,7 +4638,7 @@ gst_avi_demux_handle_seek (GstAviDemux * avi, GstPad * pad, GstEvent * event)
   }
   /* do the seek, seeksegment.position contains the new position, this
    * actually never fails. */
-  gst_avi_demux_do_seek (avi, &seeksegment);
+  gst_avi_demux_do_seek (avi, &seeksegment, flags);
 
   if (flush) {
     GstEvent *fevent = gst_event_new_flush_stop (TRUE);
@@ -4680,7 +4706,7 @@ avi_demux_handle_seek_push (GstAviDemux * avi, GstPad * pad, GstEvent * event)
   GstSeekFlags flags;
   GstSeekType cur_type = GST_SEEK_TYPE_NONE, stop_type;
   gint64 cur, stop;
-  gboolean keyframe, before, after;
+  gboolean keyframe, before, after, next;
   GstAviStream *stream;
   guint index;
   guint n, str_num;
@@ -4740,8 +4766,12 @@ avi_demux_handle_seek_push (GstAviDemux * avi, GstPad * pad, GstEvent * event)
   str_num = avi->main_stream;
   stream = &avi->stream[str_num];
 
+  next = after && !before;
+  if (seeksegment.rate < 0)
+    next = !next;
+
   /* get the entry index for the requested position */
-  index = gst_avi_demux_index_for_time (avi, stream, cur);
+  index = gst_avi_demux_index_for_time (avi, stream, cur, next);
   GST_DEBUG_OBJECT (avi, "str %u: Found entry %u for %" GST_TIME_FORMAT,
       str_num, index, GST_TIME_ARGS (cur));
   if (index == -1)
@@ -4749,12 +4779,6 @@ avi_demux_handle_seek_push (GstAviDemux * avi, GstPad * pad, GstEvent * event)
 
   /* check if we are already on a keyframe */
   if (!ENTRY_IS_KEYFRAME (&stream->index[index])) {
-    gboolean next;
-
-    next = after && !before;
-    if (seeksegment.rate < 0)
-      next = !next;
-
     if (next) {
       GST_DEBUG_OBJECT (avi, "Entry is not a keyframe - searching forward");
       /* now go to the next keyframe, this is where we should start
@@ -4793,7 +4817,7 @@ avi_demux_handle_seek_push (GstAviDemux * avi, GstPad * pad, GstEvent * event)
       continue;
 
     /* get the entry index for the requested position */
-    idx = gst_avi_demux_index_for_time (avi, str, cur);
+    idx = gst_avi_demux_index_for_time (avi, str, cur, FALSE);
     GST_DEBUG_OBJECT (avi, "str %u: Found entry %u for %" GST_TIME_FORMAT, n,
         idx, GST_TIME_ARGS (cur));
     if (idx == -1)
@@ -4801,7 +4825,7 @@ avi_demux_handle_seek_push (GstAviDemux * avi, GstPad * pad, GstEvent * event)
 
     /* check if we are already on a keyframe */
     if (!ENTRY_IS_KEYFRAME (&str->index[idx])) {
-      if (after && !before) {
+      if (next) {
         GST_DEBUG_OBJECT (avi, "Entry is not a keyframe - searching forward");
         /* now go to the next keyframe, this is where we should start
          * decoding from. */
@@ -5142,6 +5166,44 @@ gst_avi_demux_find_next (GstAviDemux * avi, gfloat rate)
   return stream_num;
 }
 
+static GstBuffer *
+gst_avi_demux_align_buffer (GstAviDemux * demux,
+    GstBuffer * buffer, gsize alignment)
+{
+  GstMapInfo map;
+
+  gst_buffer_map (buffer, &map, GST_MAP_READ);
+
+  if (map.size < sizeof (guintptr)) {
+    gst_buffer_unmap (buffer, &map);
+    return buffer;
+  }
+
+  if (((guintptr) map.data) & (alignment - 1)) {
+    GstBuffer *new_buffer;
+    GstAllocationParams params = { 0, alignment - 1, 0, 0, };
+
+    new_buffer = gst_buffer_new_allocate (NULL,
+        gst_buffer_get_size (buffer), &params);
+
+    /* Copy data "by hand", so ensure alignment is kept: */
+    gst_buffer_fill (new_buffer, 0, map.data, map.size);
+
+    gst_buffer_copy_into (new_buffer, buffer, GST_BUFFER_COPY_METADATA, 0, -1);
+    GST_DEBUG_OBJECT (demux,
+        "We want output aligned on %" G_GSIZE_FORMAT ", reallocated",
+        alignment);
+
+    gst_buffer_unmap (buffer, &map);
+    gst_buffer_unref (buffer);
+
+    return new_buffer;
+  }
+
+  gst_buffer_unmap (buffer, &map);
+  return buffer;
+}
+
 static GstFlowReturn
 gst_avi_demux_loop_data (GstAviDemux * avi)
 {
@@ -5261,6 +5323,8 @@ gst_avi_demux_loop_data (GstAviDemux * avi)
         gst_buffer_get_size (buf), GST_TIME_ARGS (timestamp),
         GST_TIME_ARGS (duration), out_offset, out_offset_end);
 
+    if (stream->alignment > 1)
+      buf = gst_avi_demux_align_buffer (avi, buf, stream->alignment);
     ret = gst_pad_push (stream->pad, buf);
 
     /* mark as processed, we increment the frame and byte counters then
@@ -5550,6 +5614,9 @@ gst_avi_demux_stream_data (GstAviDemux * avi)
           } else {
             GST_BUFFER_FLAG_UNSET (buf, GST_BUFFER_FLAG_DISCONT);
           }
+
+          if (stream->alignment > 1)
+            buf = gst_avi_demux_align_buffer (avi, buf, stream->alignment);
           res = gst_pad_push (stream->pad, buf);
           buf = NULL;
 
@@ -5700,9 +5767,7 @@ pause:{
       /* for fatal errors we post an error message, wrong-state is
        * not fatal because it happens due to flushes and only means
        * that we should stop now. */
-      GST_ELEMENT_ERROR (avi, STREAM, FAILED,
-          (_("Internal data stream error.")),
-          ("streaming stopped, reason %s", gst_flow_get_name (res)));
+      GST_ELEMENT_FLOW_ERROR (avi, res);
       push_eos = TRUE;
     }
     if (push_eos) {

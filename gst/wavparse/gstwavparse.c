@@ -54,6 +54,7 @@
 #include "gstwavparse.h"
 #include "gst/riff/riff-media.h"
 #include <gst/base/gsttypefindhelper.h>
+#include <gst/pbutils/descriptions.h>
 #include <gst/gst-i18n-plugin.h>
 
 GST_DEBUG_CATEGORY_STATIC (wavparse_debug);
@@ -1223,9 +1224,25 @@ gst_wavparse_stream_headers (GstWavParse * wav)
 
     wav->got_fmt = TRUE;
 
-    if (codec_name) {
+    if (wav->tags == NULL)
       wav->tags = gst_tag_list_new_empty ();
 
+    {
+      GstCaps *templ_caps = gst_pad_get_pad_template_caps (wav->sinkpad);
+      gst_pb_utils_add_codec_description_to_tag_list (wav->tags,
+          GST_TAG_CONTAINER_FORMAT, templ_caps);
+      gst_caps_unref (templ_caps);
+    }
+
+    /* If bps is nonzero, then we do have a valid bitrate that can be
+     * announced in a tag list. */
+    if (wav->bps) {
+      guint bitrate = wav->bps * 8;
+      gst_tag_list_add (wav->tags, GST_TAG_MERGE_REPLACE,
+          GST_TAG_BITRATE, bitrate, NULL);
+    }
+
+    if (codec_name) {
       gst_tag_list_add (wav->tags, GST_TAG_MERGE_REPLACE,
           GST_TAG_AUDIO_CODEC, codec_name, NULL);
 
@@ -1897,7 +1914,6 @@ gst_wavparse_add_src_pad (GstWavParse * wav, GstBuffer * buf)
   }
 
   gst_pad_set_caps (wav->srcpad, wav->caps);
-  gst_caps_replace (&wav->caps, NULL);
 
   if (wav->start_segment) {
     GST_DEBUG_OBJECT (wav, "Send start segment event on newpad");
@@ -2199,7 +2215,7 @@ pause:
         else if (wav->segment.rate < 0.0)
           wav->segment.position = wav->segment.start;
       }
-      if (wav->state == GST_WAVPARSE_START) {
+      if (wav->state == GST_WAVPARSE_START || !wav->caps) {
         GST_ELEMENT_ERROR (wav, STREAM, WRONG_TYPE, (NULL),
             ("No valid input found before end of stream"));
         gst_pad_push_event (wav->srcpad, gst_event_new_eos ());
@@ -2229,9 +2245,7 @@ pause:
     } else if (ret == GST_FLOW_NOT_LINKED || ret < GST_FLOW_EOS) {
       /* for fatal errors we post an error message, post the error
        * first so the app knows about the error first. */
-      GST_ELEMENT_ERROR (wav, STREAM, FAILED,
-          (_("Internal data flow error.")),
-          ("streaming task paused, reason %s (%d)", reason, ret));
+      GST_ELEMENT_FLOW_ERROR (wav, ret);
       gst_pad_push_event (wav->srcpad, gst_event_new_eos ());
     }
     return;
@@ -2412,7 +2426,7 @@ gst_wavparse_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       break;
     }
     case GST_EVENT_EOS:
-      if (wav->state == GST_WAVPARSE_START) {
+      if (wav->state == GST_WAVPARSE_START || !wav->caps) {
         GST_ELEMENT_ERROR (wav, STREAM, WRONG_TYPE, (NULL),
             ("No valid input found before end of stream"));
       } else {
@@ -2431,7 +2445,8 @@ gst_wavparse_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
     {
       GstClockTime dur;
 
-      gst_adapter_clear (wav->adapter);
+      if (wav->adapter)
+        gst_adapter_clear (wav->adapter);
       wav->discont = TRUE;
       dur = wav->segment.duration;
       gst_segment_init (&wav->segment, wav->segment.format);

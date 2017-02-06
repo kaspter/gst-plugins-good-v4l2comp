@@ -240,7 +240,7 @@ gst_shout2send_init (GstShout2send * shout2send)
 {
   gst_base_sink_set_sync (GST_BASE_SINK (shout2send), FALSE);
 
-  shout2send->timer = gst_poll_new_timer ();
+  shout2send->timer = gst_poll_new (TRUE);
 
   shout2send->ip = g_strdup (DEFAULT_IP);
   shout2send->port = DEFAULT_PORT;
@@ -826,4 +826,4 @@ GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
     shout2send,
     "Sends data to an icecast server using libshout2",
     plugin_init,
-    VERSION, "LGPL", "libshout2", "http://www.icecast.org/download.html")
+    VERSION, "LGPL", "libshout2", "http://www.icecast.org/download/")

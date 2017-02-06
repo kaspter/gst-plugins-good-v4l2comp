@@ -1,18 +1,18 @@
 # Danish translation of gst-plugins-good.
-# Copyright (C) 2015 gst.
+# Copyright (C) 2016 gst.
 # This file is distributed under the same license as the gst-plugins-good package.
 # Mogens Jaeger <mogens@jaeger.tf>, 2007.
-# Joe Hansen <joedalton2@yahoo.dk>, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015.
+# Joe Hansen <joedalton2@yahoo.dk>, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016.
 #
 # gain -> forhøjelse
 # boost -> øgning?
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: gst-plugins-good-1.7.1\n"
+"Project-Id-Version: gst-plugins-good-1.7.2\n"
 "Report-Msgid-Bugs-To: http://bugzilla.gnome.org/\n"
-"POT-Creation-Date: 2016-03-24 11:27+0200\n"
-"PO-Revision-Date: 2015-12-28 23:54+0200\n"
+"POT-Creation-Date: 2017-01-12 14:38+0200\n"
+"PO-Revision-Date: 2016-03-27 23:54+0200\n"
 "Last-Translator: Joe Hansen <joedalton2@yahoo.dk>\n"
 "Language-Team: Danish <dansk@dansk-gruppen.dk>\n"
 "Language: da\n"
@@ -37,6 +37,9 @@ msgstr "Kunne ikke forbinde til server"
 msgid "No URL set."
 msgstr "Ingen adresse angivet."
 
+msgid "Corrupted HTTP response."
+msgstr ""
+
 msgid "Server does not support seeking."
 msgstr "Server understøtter ikke søgning."
 
@@ -56,9 +59,6 @@ msgstr ""
 
 msgid "Server sent bad data."
 msgstr "Server sendte ugyldige data."
-
-msgid "Internal data stream error."
-msgstr "Intern datastrømsfejl."
 
 msgid "No or invalid input audio, AVI stream will be corrupt."
 msgstr "Ingen eller defekt inddatalyd, AVI-sekvens vil blive ødelagt."
@@ -90,9 +90,6 @@ msgstr "Videoen i denne fil afspilles måske ikke korrekt."
 #, c-format
 msgid "This file contains too many streams. Only playing first %d"
 msgstr "Denne fil indeholder for mange strømme. Afspil først kun %d"
-
-msgid "Internal data flow error."
-msgstr "Intern datastrømsfejl."
 
 msgid ""
 "No supported stream was found. You might need to install a GStreamer RTSP "
@@ -157,10 +154,10 @@ msgid "Could not open audio device for recording."
 msgstr "Kunne ikke åbne lydenhed til optagelse."
 
 msgid "CoreAudio device not found"
-msgstr ""
+msgstr "CoreAudio-enhed blev ikke fundet"
 
 msgid "CoreAudio device could not be opened"
-msgstr ""
+msgstr "CoreAudio-enhed kunne ikke åbnes"
 
 msgid "Record Source"
 msgstr "Optagelseskilde"
@@ -431,6 +428,12 @@ msgstr "Ændring af opløsning under kørsel er endnu ikke understøttet."
 
 msgid "Cannot operate without a clock"
 msgstr "Kan ikke fungere uden et ur"
+
+#~ msgid "Internal data stream error."
+#~ msgstr "Intern datastrømsfejl."
+
+#~ msgid "Internal data flow error."
+#~ msgstr "Intern datastrømsfejl."
 
 #~ msgid "Device '%s' does not support video capture"
 #~ msgstr "Enheden »%s« understøtter ikke videooptagelse"

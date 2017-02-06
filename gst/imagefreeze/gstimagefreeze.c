@@ -491,6 +491,13 @@ gst_image_freeze_src_query (GstPad * pad, GstObject * parent, GstQuery * query)
       ret = TRUE;
       break;
     }
+    case GST_QUERY_LATENCY:
+      /* This will only return an accurate latency for the first buffer since
+       * all further buffers outputted by us are just copies of that one, and
+       * the latency is 0 in that case. However, latency changes are not
+       * straightforward, so let's do the conservative fix for now. */
+      ret = gst_pad_query_default (pad, parent, query);
+      break;
     default:
       ret = FALSE;
       break;
@@ -846,9 +853,7 @@ pause_task:
     } else if (flow_ret == GST_FLOW_NOT_LINKED || flow_ret < GST_FLOW_EOS) {
       GstEvent *e = gst_event_new_eos ();
 
-      GST_ELEMENT_ERROR (self, STREAM, FAILED,
-          ("Internal data stream error."),
-          ("stream stopped, reason %s", reason));
+      GST_ELEMENT_FLOW_ERROR (self, flow_ret);
 
       if (self->seqnum)
         gst_event_set_seqnum (e, self->seqnum);

@@ -85,6 +85,7 @@ struct _GstJackAudioClient
   GstJackClientType type;
   gboolean active;
   gboolean deactivate;
+  gboolean server_down;
 
   JackShutdownCallback shutdown;
   JackProcessCallback process;
@@ -200,20 +201,6 @@ jack_process_cb (jack_nframes_t nframes, void *arg)
   return res;
 }
 
-/* we error out */
-static int
-jack_sample_rate_cb (jack_nframes_t nframes, void *arg)
-{
-  return 0;
-}
-
-/* we error out */
-static int
-jack_buffer_size_cb (jack_nframes_t nframes, void *arg)
-{
-  return 0;
-}
-
 static void
 jack_shutdown_cb (void *arg)
 {
@@ -227,16 +214,36 @@ jack_shutdown_cb (void *arg)
   for (walk = conn->src_clients; walk; walk = g_list_next (walk)) {
     GstJackAudioClient *client = (GstJackAudioClient *) walk->data;
 
+    client->server_down = TRUE;
+    g_cond_signal (&conn->flush_cond);
     if (client->shutdown)
       client->shutdown (client->user_data);
   }
   for (walk = conn->sink_clients; walk; walk = g_list_next (walk)) {
     GstJackAudioClient *client = (GstJackAudioClient *) walk->data;
 
+    client->server_down = TRUE;
+    g_cond_signal (&conn->flush_cond);
     if (client->shutdown)
       client->shutdown (client->user_data);
   }
   g_mutex_unlock (&conn->lock);
+}
+
+/* we error out */
+static int
+jack_sample_rate_cb (jack_nframes_t nframes, void *arg)
+{
+  jack_shutdown_cb (arg);
+  return 0;
+}
+
+/* we error out */
+static int
+jack_buffer_size_cb (jack_nframes_t nframes, void *arg)
+{
+  jack_shutdown_cb (arg);
+  return 0;
 }
 
 typedef struct
@@ -520,6 +527,7 @@ gst_jack_audio_client_new (const gchar * id, const gchar * server,
   client->buffer_size = buffer_size;
   client->sample_rate = sample_rate;
   client->user_data = user_data;
+  client->server_down = FALSE;
 
   /* add the client to the connection */
   gst_jack_audio_connection_add_client (conn, client);
@@ -600,7 +608,7 @@ gst_jack_audio_client_set_active (GstJackAudioClient * client, gboolean active)
     client->deactivate = TRUE;
 
     /* need to wait for process_cb run once more */
-    while (client->deactivate)
+    while (client->deactivate && !client->server_down)
       g_cond_wait (&client->conn->flush_cond, &client->conn->lock);
   }
   client->active = active;

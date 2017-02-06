@@ -1,7 +1,7 @@
 # Brazilian Portuguese translation of gst-plugins-good.
 # This file is distributed under the same license as the gst-plugins-good package.
-# Copyright (C) 2008-2015 Free Software Foundation, Inc.
-# Fabrício Godoy <skarllot@gmail.com>, 2008-2015.
+# Copyright (C) 2008-2016 Free Software Foundation, Inc.
+# Fabrício Godoy <skarllot@gmail.com>, 2008-2016.
 #
 # data flow -> fluxo de dados
 # streaming -> fluxo contínuo
@@ -11,10 +11,10 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: gst-plugins-good-1.7.1\n"
+"Project-Id-Version: gst-plugins-good-1.7.2\n"
 "Report-Msgid-Bugs-To: http://bugzilla.gnome.org/\n"
-"POT-Creation-Date: 2016-03-24 11:27+0200\n"
-"PO-Revision-Date: 2015-12-28 19:47-0200\n"
+"POT-Creation-Date: 2017-01-12 14:38+0200\n"
+"PO-Revision-Date: 2016-05-06 17:49-0300\n"
 "Last-Translator: Fabrício Godoy <skarllot@gmail.com>\n"
 "Language-Team: Brazilian Portuguese <ldpbr-translation@lists.sourceforge."
 "net>\n"
@@ -41,6 +41,9 @@ msgstr "Não foi possível conectar ao servidor"
 msgid "No URL set."
 msgstr "Nenhum URL definido."
 
+msgid "Corrupted HTTP response."
+msgstr ""
+
 msgid "Server does not support seeking."
 msgstr "Nâo há suporte a busca pelo servidor."
 
@@ -60,9 +63,6 @@ msgstr ""
 
 msgid "Server sent bad data."
 msgstr "O servidor enviou dados ruins."
-
-msgid "Internal data stream error."
-msgstr "Erro interno no fluxo de dados."
 
 msgid "No or invalid input audio, AVI stream will be corrupt."
 msgstr "Entrada de áudio nula ou inválida, o fluxo AVI pode estar corrompido."
@@ -93,9 +93,6 @@ msgstr "O vídeo neste arquivo pode não ser reproduzido corretamente."
 #, c-format
 msgid "This file contains too many streams. Only playing first %d"
 msgstr "Este arquivo contêm muitos fluxos. Apenas reproduzindo o primeiro %d"
-
-msgid "Internal data flow error."
-msgstr "Erro interno no fluxo de dados."
 
 msgid ""
 "No supported stream was found. You might need to install a GStreamer RTSP "
@@ -160,10 +157,10 @@ msgid "Could not open audio device for recording."
 msgstr "Não foi possível abrir o dispositivo de áudio para gravação."
 
 msgid "CoreAudio device not found"
-msgstr ""
+msgstr "Dispositivo CoreAudio não encontrado"
 
 msgid "CoreAudio device could not be opened"
-msgstr ""
+msgstr "Dispositivo CoreAudio não pôde ser aberto"
 
 msgid "Record Source"
 msgstr "Origem de gravação"
@@ -445,6 +442,12 @@ msgstr "Ainda não há suporte a mudança de resolução enquanto está executan
 
 msgid "Cannot operate without a clock"
 msgstr "Não é possível operar sem um temporizador"
+
+#~ msgid "Internal data stream error."
+#~ msgstr "Erro interno no fluxo de dados."
+
+#~ msgid "Internal data flow error."
+#~ msgstr "Erro interno no fluxo de dados."
 
 #~ msgid "Device '%s' does not support video capture"
 #~ msgstr "O dispositivo \"%s\" não tem suporte a captura de vídeo"

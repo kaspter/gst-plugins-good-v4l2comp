@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gst-plugins-good 1.7.2\n"
 "Report-Msgid-Bugs-To: http://bugzilla.gnome.org/\n"
-"POT-Creation-Date: 2016-03-24 11:27+0200\n"
+"POT-Creation-Date: 2017-01-12 14:38+0200\n"
 "PO-Revision-Date: 2016-02-20 16:13+0100\n"
 "Last-Translator: Sebastian Rasmussen <sebras@gmail.com>\n"
 "Language-Team: Swedish <tp-sv@listor.tp-sv.se>\n"
@@ -36,6 +36,9 @@ msgstr "Kunde inte ansluta till servern"
 msgid "No URL set."
 msgstr "Ingen URL inställd."
 
+msgid "Corrupted HTTP response."
+msgstr ""
+
 msgid "Server does not support seeking."
 msgstr "Servern stöder inte sökning/spolning."
 
@@ -54,9 +57,6 @@ msgstr "Ett nätverksfel inträffade eller servern stängde anslutningen ovänta
 
 msgid "Server sent bad data."
 msgstr "Servern skickade felaktigt data."
-
-msgid "Internal data stream error."
-msgstr "Internt fel i dataström."
 
 msgid "No or invalid input audio, AVI stream will be corrupt."
 msgstr "Inget eller ogiltigt ingångsljud. AVI-strömmen kommer att skadas."
@@ -86,9 +86,6 @@ msgstr "Videon i den här filen kanske inte kan spelas upp korrekt."
 msgid "This file contains too many streams. Only playing first %d"
 msgstr ""
 "Den här filen innehåller för många strömmar. Spelar endast upp de första %d"
-
-msgid "Internal data flow error."
-msgstr "Internt fel i dataflöde."
 
 msgid ""
 "No supported stream was found. You might need to install a GStreamer RTSP "
@@ -436,6 +433,12 @@ msgstr "Ändring av upplösning vid körtid stöds inte än."
 
 msgid "Cannot operate without a clock"
 msgstr "Kan inte fungera utan en klocka"
+
+#~ msgid "Internal data stream error."
+#~ msgstr "Internt fel i dataström."
+
+#~ msgid "Internal data flow error."
+#~ msgstr "Internt fel i dataflöde."
 
 #~ msgid "Device '%s' does not support video capture"
 #~ msgstr "Enheten \"%s\" stöder inte videoinfångning."

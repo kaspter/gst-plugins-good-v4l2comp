@@ -131,7 +131,7 @@ gst_rtp_h265_depay_class_init (GstRtpH265DepayClass * klass)
 
   gst_element_class_set_static_metadata (gstelement_class,
       "RTP H265 depayloader", "Codec/Depayloader/Network/RTP",
-      "Extracts H265 video from RTP packets (draft-ietf-payload-rtp-h265-03.txt)",
+      "Extracts H265 video from RTP packets (RFC 7798)",
       "Jurgen Slowack <jurgenslowack@gmail.com>");
   gstelement_class->change_state = gst_rtp_h265_depay_change_state;
 
@@ -146,7 +146,7 @@ gst_rtp_h265_depay_init (GstRtpH265Depay * rtph265depay)
   rtph265depay->adapter = gst_adapter_new ();
   rtph265depay->picture_adapter = gst_adapter_new ();
   rtph265depay->byte_stream = DEFAULT_BYTE_STREAM;
-  rtph265depay->stream_format = (gchar *) g_malloc (10);
+  rtph265depay->stream_format = NULL;
   rtph265depay->merge = DEFAULT_ACCESS_UNIT;
   rtph265depay->vps = g_ptr_array_new_with_free_func (
       (GDestroyNotify) gst_buffer_unref);
@@ -212,8 +212,8 @@ gst_rtp_h265_depay_negotiate (GstRtpH265Depay * rtph265depay)
       const gchar *str = NULL;
 
       if ((str = gst_structure_get_string (s, "stream-format"))) {
-
-        strcpy (rtph265depay->stream_format, str);
+        g_free (rtph265depay->stream_format);
+        rtph265depay->stream_format = g_strdup (str);
 
         if (strcmp (str, "hev1") == 0) {
           byte_stream = FALSE;
@@ -246,7 +246,8 @@ gst_rtp_h265_depay_negotiate (GstRtpH265Depay * rtph265depay)
   } else {
     GST_DEBUG_OBJECT (rtph265depay, "defaulting to byte-stream %d",
         DEFAULT_BYTE_STREAM);
-    strcpy (rtph265depay->stream_format, "byte-stream");
+    g_free (rtph265depay->stream_format);
+    rtph265depay->stream_format = g_strdup ("byte-stream");
     rtph265depay->byte_stream = DEFAULT_BYTE_STREAM;
   }
   if (merge != -1) {
@@ -306,12 +307,10 @@ gst_rtp_h265_set_src_caps (GstRtpH265Depay * rtph265depay)
     return TRUE;
 
   srccaps = gst_caps_new_simple ("video/x-h265",
-      "stream-format", G_TYPE_STRING,
-      rtph265depay->stream_format,
+      "stream-format", G_TYPE_STRING, rtph265depay->stream_format,
       "alignment", G_TYPE_STRING, rtph265depay->merge ? "au" : "nal", NULL);
 
   if (!rtph265depay->byte_stream) {
-
     GstBuffer *codec_data;
     gint i = 0;
     gint len;
@@ -755,8 +754,10 @@ gst_rtp_h265_depay_setcaps (GstRTPBaseDepayload * depayload, GstCaps * caps)
   gint clock_rate;
   GstStructure *structure = gst_caps_get_structure (caps, 0);
   GstRtpH265Depay *rtph265depay;
-  const gchar *ps;
-  GstBuffer *codec_data;
+  const gchar *vps;
+  const gchar *sps;
+  const gchar *pps;
+  gchar *ps;
   GstMapInfo map;
   guint8 *ptr;
 
@@ -767,7 +768,14 @@ gst_rtp_h265_depay_setcaps (GstRTPBaseDepayload * depayload, GstCaps * caps)
   depayload->clock_rate = clock_rate;
 
   /* Base64 encoded, comma separated config NALs */
-  ps = gst_structure_get_string (structure, "sprop-parameter-sets");
+  vps = gst_structure_get_string (structure, "sprop-vps");
+  sps = gst_structure_get_string (structure, "sprop-sps");
+  pps = gst_structure_get_string (structure, "sprop-pps");
+  if (vps == NULL || sps == NULL || pps == NULL) {
+    ps = NULL;
+  } else {
+    ps = g_strdup_printf ("%s,%s,%s", vps, sps, pps);
+  }
 
   /* negotiate with downstream w.r.t. output format and alignment */
   gst_rtp_h265_depay_negotiate (rtph265depay);
@@ -776,6 +784,7 @@ gst_rtp_h265_depay_setcaps (GstRTPBaseDepayload * depayload, GstCaps * caps)
     /* for bytestream we only need the parameter sets but we don't error out
      * when they are not there, we assume they are in the stream. */
     gchar **params;
+    GstBuffer *codec_data;
     guint len, total;
     gint i;
 
@@ -856,9 +865,13 @@ gst_rtp_h265_depay_setcaps (GstRTPBaseDepayload * depayload, GstCaps * caps)
     }
     g_strfreev (params);
 
-    if (rtph265depay->sps->len == 0 || rtph265depay->pps->len == 0)
+    if (rtph265depay->vps->len == 0 || rtph265depay->sps->len == 0 ||
+        rtph265depay->pps->len == 0) {
       goto incomplete_caps;
+    }
   }
+
+  g_free (ps);
 
   return gst_rtp_h265_set_src_caps (rtph265depay);
 
@@ -867,6 +880,7 @@ incomplete_caps:
   {
     GST_DEBUG_OBJECT (depayload, "we have incomplete caps,"
         " doing setcaps later");
+    g_free (ps);
     return TRUE;
   }
 }
@@ -1242,12 +1256,8 @@ gst_rtp_h265_depay_process (GstRTPBaseDepayload * depayload, GstRTPBuffer * rtp)
         }
 
         outsize = gst_adapter_available (rtph265depay->adapter);
-        if (outsize > 0) {
+        if (outsize > 0)
           outbuf = gst_adapter_take_buffer (rtph265depay->adapter, outsize);
-          outbuf =
-              gst_rtp_h265_depay_handle_nal (rtph265depay, outbuf, timestamp,
-              marker);
-        }
         break;
       }
       case 49:

@@ -87,6 +87,7 @@ enum
 };
 
 #define  DEFAULT_MAX_GAP_TIME      (2 * GST_SECOND)
+#define  INVALID_DATA_THRESHOLD    (2 * 1024 * 1024)
 
 static GstStaticPadTemplate sink_templ = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
@@ -172,7 +173,7 @@ static GstCaps
 /* stream methods */
 static void gst_matroska_demux_reset (GstElement * element);
 static gboolean perform_seek_to_offset (GstMatroskaDemux * demux,
-    gdouble rate, guint64 offset, guint32 seqnum);
+    gdouble rate, guint64 offset, guint32 seqnum, GstSeekFlags flags);
 
 /* gobject functions */
 static void gst_matroska_demux_set_property (GObject * object,
@@ -1765,13 +1766,22 @@ gst_matroska_demux_search_cluster (GstMatroskaDemux * demux, gint64 * pos)
       demux->common.offset += length + needed;
       ret = gst_matroska_read_common_peek_id_length_pull (&demux->common,
           GST_ELEMENT_CAST (demux), &id, &length, &needed);
-      if (ret != GST_FLOW_OK)
+      if (ret != GST_FLOW_OK) {
+        /* we skipped one byte in the reader above, need to accomodate for
+         * that when resuming skipping from the reader instead of reading a
+         * new chunk */
+        newpos += 1;
         goto resume;
+      }
       GST_DEBUG_OBJECT (demux, "next element is %scluster",
           id == GST_MATROSKA_ID_CLUSTER ? "" : "not ");
       if (id == GST_MATROSKA_ID_CLUSTER)
         break;
-      /* not ok, resume */
+      /* not ok, resume
+       * we skipped one byte in the reader above, need to accomodate for
+       * that when resuming skipping from the reader instead of reading a
+       * new chunk */
+      newpos += 1;
       goto resume;
     } else {
       /* partial cluster id may have been in tail of buffer */
@@ -2164,13 +2174,19 @@ next:
   }
 
 finish:
-  if (keyunit) {
+  if (keyunit && seeksegment.rate > 0) {
     GST_DEBUG_OBJECT (demux, "seek to key unit, adjusting segment start from %"
         GST_TIME_FORMAT " to %" GST_TIME_FORMAT,
         GST_TIME_ARGS (seeksegment.start), GST_TIME_ARGS (entry->time));
     seeksegment.start = MAX (entry->time, demux->stream_start_time);
     seeksegment.position = seeksegment.start;
     seeksegment.time = seeksegment.start - demux->stream_start_time;
+  } else if (keyunit) {
+    GST_DEBUG_OBJECT (demux, "seek to key unit, adjusting segment stop from %"
+        GST_TIME_FORMAT " to %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (seeksegment.stop), GST_TIME_ARGS (entry->time));
+    seeksegment.stop = MAX (entry->time, demux->stream_start_time);
+    seeksegment.position = seeksegment.stop;
   }
 
   if (demux->streaming) {
@@ -2184,7 +2200,7 @@ finish:
     /* upstream takes care of flushing and all that
      * ... and newsegment event handling takes care of the rest */
     return perform_seek_to_offset (demux, rate,
-        entry->pos + demux->common.ebml_segment_start, seqnum);
+        entry->pos + demux->common.ebml_segment_start, seqnum, flags);
   }
 
 exit:
@@ -2326,7 +2342,7 @@ gst_matroska_demux_handle_seek_push (GstMatroskaDemux * demux, GstPad * pad,
       /* seek to the first subindex or legacy index */
       GST_INFO_OBJECT (demux, "Seeking to Cues at %" G_GUINT64_FORMAT, offset);
       return perform_seek_to_offset (demux, rate, offset,
-          gst_event_get_seqnum (event));
+          gst_event_get_seqnum (event), GST_SEEK_FLAG_NONE);
     }
 
     /* well, we are handling it already */
@@ -4375,8 +4391,21 @@ gst_matroska_demux_parse_id (GstMatroskaDemux * demux, guint32 id,
       break;
     case GST_MATROSKA_READ_STATE_SCANNING:
       if (id != GST_MATROSKA_ID_CLUSTER &&
-          id != GST_MATROSKA_ID_CLUSTERTIMECODE)
+          id != GST_MATROSKA_ID_CLUSTERTIMECODE) {
+        if (demux->common.start_resync_offset != -1) {
+          /* we need to skip byte per byte if we are scanning for a new cluster
+           * after invalid data is found
+           */
+          read = 1;
+        }
         goto skip;
+      } else {
+        if (demux->common.start_resync_offset != -1) {
+          GST_LOG_OBJECT (demux, "Resync done, new cluster found!");
+          demux->common.start_resync_offset = -1;
+          demux->common.state = demux->common.state_to_restore;
+        }
+      }
       /* fall-through */
     case GST_MATROSKA_READ_STATE_HEADER:
     case GST_MATROSKA_READ_STATE_DATA:
@@ -4756,8 +4785,7 @@ pause:
       }
     } else if (ret == GST_FLOW_NOT_LINKED || ret < GST_FLOW_EOS) {
       /* for fatal errors we post an error message */
-      GST_ELEMENT_ERROR (demux, STREAM, FAILED, (NULL),
-          ("stream stopped, reason %s", reason));
+      GST_ELEMENT_FLOW_ERROR (demux, ret);
       push_eos = TRUE;
     }
     if (push_eos) {
@@ -4783,7 +4811,7 @@ pause:
  */
 static gboolean
 perform_seek_to_offset (GstMatroskaDemux * demux, gdouble rate, guint64 offset,
-    guint32 seqnum)
+    guint32 seqnum, GstSeekFlags flags)
 {
   GstEvent *event;
   gboolean res = 0;
@@ -4792,8 +4820,8 @@ perform_seek_to_offset (GstMatroskaDemux * demux, gdouble rate, guint64 offset,
 
   event =
       gst_event_new_seek (rate, GST_FORMAT_BYTES,
-      GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE, GST_SEEK_TYPE_SET, offset,
-      GST_SEEK_TYPE_NONE, -1);
+      flags | GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE,
+      GST_SEEK_TYPE_SET, offset, GST_SEEK_TYPE_NONE, -1);
   gst_event_set_seqnum (event, seqnum);
 
   res = gst_pad_push_event (demux->common.sinkpad, event);
@@ -4832,9 +4860,29 @@ next:
   if (G_UNLIKELY (ret != GST_FLOW_OK && ret != GST_FLOW_EOS)) {
     if (demux->common.ebml_segment_length != G_MAXUINT64
         && demux->common.offset >=
-        demux->common.ebml_segment_start + demux->common.ebml_segment_length)
-      ret = GST_FLOW_EOS;
-    return ret;
+        demux->common.ebml_segment_start + demux->common.ebml_segment_length) {
+      return GST_FLOW_OK;
+    } else {
+      gint64 bytes_scanned;
+      if (demux->common.start_resync_offset == -1) {
+        demux->common.start_resync_offset = demux->common.offset;
+        demux->common.state_to_restore = demux->common.state;
+      }
+      bytes_scanned = demux->common.offset - demux->common.start_resync_offset;
+      if (bytes_scanned <= INVALID_DATA_THRESHOLD) {
+        GST_WARNING_OBJECT (demux,
+            "parse error, looking for next cluster, actual offset %"
+            G_GUINT64_FORMAT ", start resync offset %" G_GUINT64_FORMAT,
+            demux->common.offset, demux->common.start_resync_offset);
+        demux->common.state = GST_MATROSKA_READ_STATE_SCANNING;
+        ret = GST_FLOW_OK;
+      } else {
+        GST_WARNING_OBJECT (demux,
+            "unrecoverable parse error, next cluster not found and threshold "
+            "exceeded, bytes scanned %" G_GINT64_FORMAT, bytes_scanned);
+        return ret;
+      }
+    }
   }
 
   GST_LOG_OBJECT (demux, "Offset %" G_GUINT64_FORMAT ", Element id 0x%x, "
@@ -4907,6 +4955,7 @@ gst_matroska_demux_handle_sink_event (GstPad * pad, GstObject * parent,
       demux->segment_seqnum = gst_event_get_seqnum (event);
       /* but keep some of the upstream segment */
       demux->common.segment.rate = segment->rate;
+      demux->common.segment.flags = segment->flags;
       /* also check if need to keep some of the requested seek position */
       if (demux->seek_offset == segment->start) {
         GST_DEBUG_OBJECT (demux, "position matches requested seek");
@@ -4927,7 +4976,8 @@ gst_matroska_demux_handle_sink_event (GstPad * pad, GstObject * parent,
     }
     case GST_EVENT_EOS:
     {
-      if (demux->common.state != GST_MATROSKA_READ_STATE_DATA) {
+      if (demux->common.state != GST_MATROSKA_READ_STATE_DATA
+          && demux->common.state != GST_MATROSKA_READ_STATE_SCANNING) {
         gst_event_unref (event);
         GST_ELEMENT_ERROR (demux, STREAM, DEMUX,
             (NULL), ("got eos and didn't receive a complete header object"));

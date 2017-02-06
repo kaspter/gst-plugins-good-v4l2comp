@@ -298,7 +298,6 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
   /* first see what is possible on our source pad */
   thiscaps = gst_pad_query_caps (GST_BASE_SRC_PAD (basesrc), NULL);
   GST_DEBUG_OBJECT (basesrc, "caps of src: %" GST_PTR_FORMAT, thiscaps);
-  LOG_CAPS (basesrc, thiscaps);
 
   /* nothing or anything is allowed, we're done */
   if (thiscaps == NULL || gst_caps_is_any (thiscaps))
@@ -307,31 +306,14 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
   /* get the peer caps without a filter as we'll filter ourselves later on */
   peercaps = gst_pad_peer_query_caps (GST_BASE_SRC_PAD (basesrc), NULL);
   GST_DEBUG_OBJECT (basesrc, "caps of peer: %" GST_PTR_FORMAT, peercaps);
-  LOG_CAPS (basesrc, peercaps);
   if (peercaps && !gst_caps_is_any (peercaps)) {
     GstCaps *icaps = NULL;
-    int i;
 
     /* Prefer the first caps we are compatible with that the peer proposed */
-    for (i = 0; i < gst_caps_get_size (peercaps); i++) {
-      /* get intersection */
-      GstCaps *ipcaps = gst_caps_copy_nth (peercaps, i);
-
-      GST_DEBUG_OBJECT (basesrc, "peer: %" GST_PTR_FORMAT, ipcaps);
-      LOG_CAPS (basesrc, ipcaps);
-
-      icaps = gst_caps_intersect (thiscaps, ipcaps);
-      gst_caps_unref (ipcaps);
-
-      if (!gst_caps_is_empty (icaps))
-        break;
-
-      gst_caps_unref (icaps);
-      icaps = NULL;
-    }
+    icaps = gst_caps_intersect_full (peercaps, thiscaps,
+        GST_CAPS_INTERSECT_FIRST);
 
     GST_DEBUG_OBJECT (basesrc, "intersect: %" GST_PTR_FORMAT, icaps);
-    LOG_CAPS (basesrc, icaps);
     if (icaps) {
       /* If there are multiple intersections pick the one with the smallest
        * resolution strictly bigger then the first peer caps */
@@ -343,6 +325,7 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
 
         if (gst_structure_get_int (s, "width", &twidth)
             && gst_structure_get_int (s, "height", &theight)) {
+          int i;
 
           /* Walk the structure backwards to get the first entry of the
            * smallest resolution bigger (or equal to) the preferred resolution)
@@ -382,7 +365,6 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
     if (!gst_caps_is_empty (caps)) {
       caps = gst_v4l2src_fixate (basesrc, caps);
       GST_DEBUG_OBJECT (basesrc, "fixated to: %" GST_PTR_FORMAT, caps);
-      LOG_CAPS (basesrc, caps);
 
       if (gst_caps_is_any (caps)) {
         /* hmm, still anything, so element can do anything and
@@ -425,6 +407,7 @@ gst_v4l2src_get_caps (GstBaseSrc * src, GstCaps * filter)
 static gboolean
 gst_v4l2src_set_format (GstV4l2Src * v4l2src, GstCaps * caps)
 {
+  GstV4l2Error error = GST_V4L2_ERROR_INIT;
   GstV4l2Object *obj;
 
   obj = v4l2src->v4l2object;
@@ -432,9 +415,10 @@ gst_v4l2src_set_format (GstV4l2Src * v4l2src, GstCaps * caps)
   g_signal_emit (v4l2src, gst_v4l2_signals[SIGNAL_PRE_SET_FORMAT], 0,
       v4l2src->v4l2object->video_fd, caps);
 
-  if (!gst_v4l2_object_set_format (obj, caps))
-    /* error already posted */
+  if (!gst_v4l2_object_set_format (obj, caps, &error)) {
+    gst_v4l2_error (v4l2src, &error);
     return FALSE;
+  }
 
   return TRUE;
 }
@@ -453,17 +437,20 @@ gst_v4l2src_set_caps (GstBaseSrc * src, GstCaps * caps)
     return TRUE;
 
   if (GST_V4L2_IS_ACTIVE (obj)) {
+    GstV4l2Error error = GST_V4L2_ERROR_INIT;
     /* Just check if the format is acceptable, once we know
      * no buffers should be outstanding we try S_FMT.
      *
      * Basesrc will do an allocation query that
      * should indirectly reclaim buffers, after that we can
      * set the format and then configure our pool */
-    if (gst_v4l2_object_try_format (obj, caps)) {
+    if (gst_v4l2_object_try_format (obj, caps, &error)) {
       v4l2src->renegotiation_adjust = v4l2src->offset + 1;
       v4l2src->pending_set_fmt = TRUE;
-    } else
+    } else {
+      gst_v4l2_error (v4l2src, &error);
       return FALSE;
+    }
   } else {
     /* make sure we stop capturing and dealloc buffers */
     if (!gst_v4l2_object_stop (obj))
@@ -489,6 +476,34 @@ gst_v4l2src_decide_allocation (GstBaseSrc * bsrc, GstQuery * query)
     ret = gst_v4l2src_set_format (src, caps);
     gst_caps_unref (caps);
     src->pending_set_fmt = FALSE;
+  } else if (gst_buffer_pool_is_active (src->v4l2object->pool)) {
+    /* Trick basesrc into not deactivating the active pool. Renegotiating here
+     * would otherwise turn off and on the camera. */
+    GstAllocator *allocator;
+    GstAllocationParams params;
+    GstBufferPool *pool;
+
+    gst_base_src_get_allocator (bsrc, &allocator, &params);
+    pool = gst_base_src_get_buffer_pool (bsrc);
+
+    if (gst_query_get_n_allocation_params (query))
+      gst_query_set_nth_allocation_param (query, 0, allocator, &params);
+    else
+      gst_query_add_allocation_param (query, allocator, &params);
+
+    if (gst_query_get_n_allocation_pools (query))
+      gst_query_set_nth_allocation_pool (query, 0, pool,
+          src->v4l2object->info.size, 1, 0);
+    else
+      gst_query_add_allocation_pool (query, pool, src->v4l2object->info.size, 1,
+          0);
+
+    if (pool)
+      gst_object_unref (pool);
+    if (allocator)
+      gst_object_unref (allocator);
+
+    return GST_BASE_SRC_CLASS (parent_class)->decide_allocation (bsrc, query);
   }
 
   if (ret) {
@@ -853,6 +868,7 @@ alloc_failed:
   }
 error:
   {
+    gst_buffer_replace (buf, NULL);
     if (ret == GST_V4L2_FLOW_LAST_BUFFER) {
       GST_ELEMENT_ERROR (src, RESOURCE, FAILED,
           ("Driver returned a buffer with no payload, this most likely "

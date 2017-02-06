@@ -45,6 +45,7 @@
 
 #include <glib.h>
 #include <string.h>
+#include <gst/video/video.h>
 
 #include "descriptors.h"
 #include "properties.h"
@@ -111,6 +112,8 @@ void          atoms_context_free (AtomsContext *context);
 #define METADATA_TEXT_FLAG 0x1
 
 /* atom defs and functions */
+
+typedef struct _AtomInfo AtomInfo;
 
 /*
  * Used for storing time related values for some atoms.
@@ -281,6 +284,45 @@ typedef struct _AtomHMHD
   guint32 sliding_avg_bitrate;
 } AtomHMHD;
 
+typedef struct _AtomTCMI
+{
+  AtomFull header;
+
+  guint16 text_font;
+  guint16 text_face;
+  guint16 text_size;
+  guint16 text_color[3];
+  guint16 bg_color[3];
+  gchar *font_name;
+} AtomTCMI;
+
+typedef struct _AtomTMCD
+{
+  Atom header;
+
+  AtomTCMI tcmi;
+} AtomTMCD;
+
+typedef struct _AtomGMIN
+{
+  AtomFull header;
+
+  guint16 graphics_mode;
+  guint16 opcolor[3];
+  guint8 balance;
+  guint8 reserved;
+
+} AtomGMIN;
+
+typedef struct _AtomGMHD
+{
+  Atom header;
+
+  AtomGMIN gmin;
+  AtomTMCD tmcd;
+
+} AtomGMHD;
+
 typedef struct _AtomURL
 {
   AtomFull header;
@@ -342,6 +384,7 @@ typedef enum _SampleEntryKind
   AUDIO,
   VIDEO,
   SUBTITLE,
+  TIMECODE
 } SampleEntryKind;
 
 typedef struct _SampleTableEntry
@@ -415,6 +458,27 @@ typedef struct _SampleTableEntryMP4A
   GList *extension_atoms;
 } SampleTableEntryMP4A;
 
+typedef struct _AtomNAME
+{
+  Atom header;
+
+  guint8 language_code;
+  gchar *name;
+} AtomNAME;
+
+typedef struct _SampleTableEntryTMCD
+{
+  SampleTableEntry se;
+
+  guint32 tc_flags;
+  guint32 timescale;
+  guint32 frame_duration;
+  guint8 n_frames;
+
+  AtomNAME name;
+
+} SampleTableEntryTMCD;
+
 typedef struct _SampleTableEntryTX3G
 {
   SampleTableEntry se;
@@ -463,6 +527,14 @@ typedef struct _AtomSTSC
   ATOM_ARRAY (STSCEntry) entries;
 } AtomSTSC;
 
+/* FIXME: this can support multiple tracks */
+typedef struct _AtomTREF
+{
+  Atom header;
+
+  guint32 reftype;
+  ATOM_ARRAY (guint32) entries;
+} AtomTREF;
 
 /*
  * used for both STCO and CO64
@@ -514,6 +586,7 @@ typedef struct _AtomMINF
   AtomVMHD *vmhd;
   AtomSMHD *smhd;
   AtomHMHD *hmhd;
+  AtomGMHD *gmhd;
 
   AtomHDLR *hdlr;
   AtomDINF dinf;
@@ -616,14 +689,25 @@ enum TfFlags
   TF_DEFAULT_BASE_IS_MOOF     = 0x020000  /* default-base-is-moof */
 };
 
+/* Timecode flags */
+enum TcFlags
+{
+  TC_DROP_FRAME = 0x0001,   /* Drop-frame timecode */
+  TC_24H_MAX = 0x0002,      /* Whether the timecode wraps after 24 hours */
+  TC_NEGATIVE_OK = 0x0004,  /* Whether negative time values are OK */
+  TC_COUNTER = 0x0008       /* Whether the time value corresponds to a tape counter value */
+};
+
 typedef struct _AtomTRAK
 {
   Atom header;
 
   AtomTKHD tkhd;
+  AtomInfo *tapt;
   AtomEDTS *edts;
   AtomMDIA mdia;
   AtomUDTA udta;
+  AtomTREF *tref;
 
   /* some helper info for structural conformity checks */
   gboolean is_video;
@@ -680,6 +764,13 @@ typedef struct _AtomTFHD
   guint32 default_sample_flags;
 } AtomTFHD;
 
+typedef struct _AtomTFDT
+{
+  AtomFull header;
+
+  guint64 base_media_decode_time;
+} AtomTFDT;
+
 typedef struct _TRUNSampleEntry
 {
   guint32 sample_duration;
@@ -716,6 +807,8 @@ typedef struct _AtomTRAF
   Atom header;
 
   AtomTFHD tfhd;
+
+  AtomTFDT tfdt;
 
   /* list of AtomTRUN */
   GList *truns;
@@ -803,13 +896,12 @@ typedef guint64 (*AtomFreeFunc) (Atom *atom);
  * All we need are the two functions (copying it to an array
  * for serialization and the memory releasing function).
  */
-typedef struct _AtomInfo
+struct _AtomInfo
 {
   Atom *atom;
   AtomCopyDataFunc copy_data_func;
   AtomFreeFunc free_func;
-} AtomInfo;
-
+};
 
 guint64    atom_copy_data              (Atom *atom, guint8 **buffer,
                                         guint64 *size, guint64* offset);
@@ -867,6 +959,7 @@ void       atom_moof_free              (AtomMOOF *moof);
 guint64    atom_moof_copy_data         (AtomMOOF *moof, guint8 **buffer, guint64 *size, guint64* offset);
 AtomTRAF * atom_traf_new               (AtomsContext * context, guint32 track_ID);
 void       atom_traf_free              (AtomTRAF * traf);
+void       atom_traf_set_base_decode_time (AtomTRAF * traf, guint64 base_decode_time);
 void       atom_traf_add_samples       (AtomTRAF * traf, guint32 delta,
                                         guint32 size, gboolean sync, gint64 pts_offset,
                                         gboolean sdtp_sync);
@@ -937,6 +1030,9 @@ SampleTableEntryMP4V * atom_trak_set_video_type (AtomTRAK * trak, AtomsContext *
 SampleTableEntryTX3G * atom_trak_set_subtitle_type (AtomTRAK * trak, AtomsContext * context,
                                SubtitleSampleEntry * entry);
 
+SampleTableEntryTMCD *
+atom_trak_set_timecode_type (AtomTRAK * trak, AtomsContext * context, GstVideoTimeCode * tc);
+
 void atom_trak_update_bitrates (AtomTRAK * trak, guint32 avg_bitrate,
                                 guint32 max_bitrate);
 
@@ -959,7 +1055,12 @@ AtomInfo *   build_jp2h_extension        (gint width, gint height, const gchar *
                                           const GValue * cdef_array);
 
 AtomInfo *   build_jp2x_extension        (const GstBuffer * prefix);
-AtomInfo *   build_fiel_extension        (gint fields);
+AtomInfo *   build_fiel_extension        (GstVideoInterlaceMode mode, GstVideoFieldOrder order);
+AtomInfo *   build_colr_extension        (const GstVideoColorimetry *colorimetry, gboolean is_mp4);
+AtomInfo *   build_clap_extension        (gint width_n, gint width_d, gint height_n, gint height_d, gint h_off_n, gint h_off_d, gint v_off_n, gint v_off_d);
+AtomInfo *   build_tapt_extension        (gint clef_width, gint clef_height, gint prof_width, gint prof_height, gint enof_width, gint enof_height);
+
+
 AtomInfo *   build_ac3_extension         (guint8 fscod, guint8 bsid,
                                           guint8 bsmod, guint8 acmod,
                                           guint8 lfe_on, guint8 bitrate_code);
@@ -996,6 +1097,9 @@ void atom_udta_add_3gp_tag           (AtomUDTA *udta, guint32 fourcc, guint8 * d
                                       guint size);
 
 void atom_udta_add_xmp_tags          (AtomUDTA *udta, GstBuffer * xmp);
+
+AtomTREF * atom_tref_new (guint32 reftype);
+void atom_tref_add_entry (AtomTREF * tref, guint32 sample);
 
 #define GST_QT_MUX_DEFAULT_TAG_LANGUAGE   "und" /* undefined/unknown */
 guint16  language_code               (const char * lang);

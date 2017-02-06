@@ -554,7 +554,7 @@
 <RANGE></RANGE>
 <FLAGS>rw</FLAGS>
 <NICK>Multicast Interface</NICK>
-<BLURB>The network interface on which to join the multicast group.</BLURB>
+<BLURB>The network interface on which to join the multicast group.This allows multiple interfaces seperated by comma. ("eth0,eth1").</BLURB>
 <DEFAULT>NULL</DEFAULT>
 </ARG>
 
@@ -1015,7 +1015,7 @@
 <FLAGS>rw</FLAGS>
 <NICK>User Agent</NICK>
 <BLURB>The User-Agent string to send to the server.</BLURB>
-<DEFAULT>"GStreamer/1.9.0.1"</DEFAULT>
+<DEFAULT>"GStreamer/1.11.1"</DEFAULT>
 </ARG>
 
 <ARG>
@@ -2234,7 +2234,7 @@
 <RANGE></RANGE>
 <FLAGS>rwx</FLAGS>
 <NICK>method</NICK>
-<BLURB>method.</BLURB>
+<BLURB>method (deprecated, use video-direction instead).</BLURB>
 <DEFAULT>Identity (no rotation)</DEFAULT>
 </ARG>
 
@@ -19705,7 +19705,7 @@
 <FLAGS>rw</FLAGS>
 <NICK>Client Name</NICK>
 <BLURB>The PulseAudio client name to use.</BLURB>
-<DEFAULT>"lt-gst-plugins-good-plugins-scan"</DEFAULT>
+<DEFAULT>"gst-plugins-good-plugins-scan"</DEFAULT>
 </ARG>
 
 <ARG>
@@ -19795,7 +19795,7 @@
 <FLAGS>rw</FLAGS>
 <NICK>Client Name</NICK>
 <BLURB>The PulseAudio client_name_to_use.</BLURB>
-<DEFAULT>"lt-gst-plugins-good-plugins-scan"</DEFAULT>
+<DEFAULT>"gst-plugins-good-plugins-scan"</DEFAULT>
 </ARG>
 
 <ARG>
@@ -20559,6 +20559,16 @@
 </ARG>
 
 <ARG>
+<NAME>GstRtpBin::max-streams</NAME>
+<TYPE>guint</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Max Streams</NICK>
+<BLURB>The maximum number of streams to create for one session.</BLURB>
+<DEFAULT>4294967295</DEFAULT>
+</ARG>
+
+<ARG>
 <NAME>GstRtpJitterBuffer::do-lost</NAME>
 <TYPE>gboolean</TYPE>
 <RANGE></RANGE>
@@ -20644,7 +20654,7 @@
 <RANGE>>= G_MAXULONG</RANGE>
 <FLAGS>rw</FLAGS>
 <NICK>RTX Delay Reorder</NICK>
-<BLURB>Sending retransmission event when this much reordering (-1 automatic).</BLURB>
+<BLURB>Sending retransmission event when this much reordering (0 disable, -1 automatic).</BLURB>
 <DEFAULT>3</DEFAULT>
 </ARG>
 
@@ -20756,6 +20766,26 @@
 <NICK>Sync on RFC7273 clock</NICK>
 <BLURB>Synchronize received streams to the RFC7273 clock (requires clock and offset to be provided).</BLURB>
 <DEFAULT>FALSE</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>GstRtpJitterBuffer::rtx-deadline</NAME>
+<TYPE>gint</TYPE>
+<RANGE>>= G_MAXULONG</RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>RTX Deadline (ms)</NICK>
+<BLURB>The deadline for a valid RTX request in milliseconds. (-1 automatic).</BLURB>
+<DEFAULT>-1</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>GstRtpJitterBuffer::rtx-stats-timeout</NAME>
+<TYPE>guint</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>RTX Statistics Timeout</NICK>
+<BLURB>The time to wait for a retransmitted packet after it has been considered lost in order to collect statistics (ms).</BLURB>
+<DEFAULT>1000</DEFAULT>
 </ARG>
 
 <ARG>
@@ -21269,6 +21299,16 @@
 </ARG>
 
 <ARG>
+<NAME>GstFlvMux::metadatacreator</NAME>
+<TYPE>gchar*</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>metadatacreator</NICK>
+<BLURB>The value of metadatacreator in the meta packet.</BLURB>
+<DEFAULT>NULL</DEFAULT>
+</ARG>
+
+<ARG>
 <NAME>GstCapsSetter::caps</NAME>
 <TYPE>GstCaps*</TYPE>
 <RANGE></RANGE>
@@ -21581,11 +21621,11 @@
 <ARG>
 <NAME>GstQTMux::movie-timescale</NAME>
 <TYPE>guint</TYPE>
-<RANGE>>= 1</RANGE>
+<RANGE></RANGE>
 <FLAGS>rwx</FLAGS>
 <NICK>Movie timescale</NICK>
-<BLURB>Timescale to use in the movie (units per second).</BLURB>
-<DEFAULT>1800</DEFAULT>
+<BLURB>Timescale to use in the movie (units per second, 0 == default).</BLURB>
+<DEFAULT>0</DEFAULT>
 </ARG>
 
 <ARG>
@@ -21656,6 +21696,26 @@
 <NICK>Interval at which to update index tables (ns)</NICK>
 <BLURB>When used with reserved-max-duration, periodically updates the index tables with information muxed so far.</BLURB>
 <DEFAULT>18446744073709551615</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>GstQTMux::interleave-bytes</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (bytes)</NICK>
+<BLURB>Interleave between streams in bytes.</BLURB>
+<DEFAULT>0</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>GstQTMux::interleave-time</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (time)</NICK>
+<BLURB>Interleave between streams in nanoseconds.</BLURB>
+<DEFAULT>250000000</DEFAULT>
 </ARG>
 
 <ARG>
@@ -21751,11 +21811,11 @@
 <ARG>
 <NAME>GstMP4Mux::movie-timescale</NAME>
 <TYPE>guint</TYPE>
-<RANGE>>= 1</RANGE>
+<RANGE></RANGE>
 <FLAGS>rwx</FLAGS>
 <NICK>Movie timescale</NICK>
-<BLURB>Timescale to use in the movie (units per second).</BLURB>
-<DEFAULT>1800</DEFAULT>
+<BLURB>Timescale to use in the movie (units per second, 0 == default).</BLURB>
+<DEFAULT>0</DEFAULT>
 </ARG>
 
 <ARG>
@@ -21829,6 +21889,26 @@
 </ARG>
 
 <ARG>
+<NAME>GstMP4Mux::interleave-bytes</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (bytes)</NICK>
+<BLURB>Interleave between streams in bytes.</BLURB>
+<DEFAULT>0</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>GstMP4Mux::interleave-time</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (time)</NICK>
+<BLURB>Interleave between streams in nanoseconds.</BLURB>
+<DEFAULT>250000000</DEFAULT>
+</ARG>
+
+<ARG>
 <NAME>GstMJ2Mux::dts-method</NAME>
 <TYPE>GstQTMuxDtsMethods</TYPE>
 <RANGE></RANGE>
@@ -21881,11 +21961,11 @@
 <ARG>
 <NAME>GstMJ2Mux::movie-timescale</NAME>
 <TYPE>guint</TYPE>
-<RANGE>>= 1</RANGE>
+<RANGE></RANGE>
 <FLAGS>rwx</FLAGS>
 <NICK>Movie timescale</NICK>
-<BLURB>Timescale to use in the movie (units per second).</BLURB>
-<DEFAULT>1800</DEFAULT>
+<BLURB>Timescale to use in the movie (units per second, 0 == default).</BLURB>
+<DEFAULT>0</DEFAULT>
 </ARG>
 
 <ARG>
@@ -21959,6 +22039,26 @@
 </ARG>
 
 <ARG>
+<NAME>GstMJ2Mux::interleave-bytes</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (bytes)</NICK>
+<BLURB>Interleave between streams in bytes.</BLURB>
+<DEFAULT>0</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>GstMJ2Mux::interleave-time</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (time)</NICK>
+<BLURB>Interleave between streams in nanoseconds.</BLURB>
+<DEFAULT>250000000</DEFAULT>
+</ARG>
+
+<ARG>
 <NAME>GstISMLMux::dts-method</NAME>
 <TYPE>GstQTMuxDtsMethods</TYPE>
 <RANGE></RANGE>
@@ -22011,11 +22111,11 @@
 <ARG>
 <NAME>GstISMLMux::movie-timescale</NAME>
 <TYPE>guint</TYPE>
-<RANGE>>= 1</RANGE>
+<RANGE></RANGE>
 <FLAGS>rwx</FLAGS>
 <NICK>Movie timescale</NICK>
-<BLURB>Timescale to use in the movie (units per second).</BLURB>
-<DEFAULT>1800</DEFAULT>
+<BLURB>Timescale to use in the movie (units per second, 0 == default).</BLURB>
+<DEFAULT>0</DEFAULT>
 </ARG>
 
 <ARG>
@@ -22089,6 +22189,26 @@
 </ARG>
 
 <ARG>
+<NAME>GstISMLMux::interleave-bytes</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (bytes)</NICK>
+<BLURB>Interleave between streams in bytes.</BLURB>
+<DEFAULT>0</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>GstISMLMux::interleave-time</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (time)</NICK>
+<BLURB>Interleave between streams in nanoseconds.</BLURB>
+<DEFAULT>250000000</DEFAULT>
+</ARG>
+
+<ARG>
 <NAME>Gst3GPPMux::dts-method</NAME>
 <TYPE>GstQTMuxDtsMethods</TYPE>
 <RANGE></RANGE>
@@ -22141,11 +22261,11 @@
 <ARG>
 <NAME>Gst3GPPMux::movie-timescale</NAME>
 <TYPE>guint</TYPE>
-<RANGE>>= 1</RANGE>
+<RANGE></RANGE>
 <FLAGS>rwx</FLAGS>
 <NICK>Movie timescale</NICK>
-<BLURB>Timescale to use in the movie (units per second).</BLURB>
-<DEFAULT>1800</DEFAULT>
+<BLURB>Timescale to use in the movie (units per second, 0 == default).</BLURB>
+<DEFAULT>0</DEFAULT>
 </ARG>
 
 <ARG>
@@ -22216,6 +22336,26 @@
 <NICK>Interval at which to update index tables (ns)</NICK>
 <BLURB>When used with reserved-max-duration, periodically updates the index tables with information muxed so far.</BLURB>
 <DEFAULT>18446744073709551615</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>Gst3GPPMux::interleave-bytes</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (bytes)</NICK>
+<BLURB>Interleave between streams in bytes.</BLURB>
+<DEFAULT>0</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>Gst3GPPMux::interleave-time</NAME>
+<TYPE>guint64</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Interleave (time)</NICK>
+<BLURB>Interleave between streams in nanoseconds.</BLURB>
+<DEFAULT>250000000</DEFAULT>
 </ARG>
 
 <ARG>
@@ -23886,6 +24026,16 @@
 <NICK>Max files</NICK>
 <BLURB>Maximum number of files to keep on disk. Once the maximum is reached,old files start to be deleted to make room for new ones.</BLURB>
 <DEFAULT>0</DEFAULT>
+</ARG>
+
+<ARG>
+<NAME>GstSplitMuxSink::send-keyframe-requests</NAME>
+<TYPE>gboolean</TYPE>
+<RANGE></RANGE>
+<FLAGS>rw</FLAGS>
+<NICK>Request keyframes at max-size-time</NICK>
+<BLURB>Request a keyframe every max-size-time ns to try splitting at that point. Needs max-size-bytes to be 0 in order to be effective.</BLURB>
+<DEFAULT>FALSE</DEFAULT>
 </ARG>
 
 <ARG>

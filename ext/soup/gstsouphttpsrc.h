@@ -61,7 +61,6 @@ struct _GstSoupHTTPSrc {
   gchar **cookies;             /* HTTP request cookies. */
   SoupSession *session;        /* Async context. */
   SoupMessage *msg;            /* Request message. */
-  GstFlowReturn ret;           /* Return code from callback. */
   gint retry_count;            /* Number of retries since we received data */
   gint max_retries;            /* Maximum number of retries */
   gchar *method;               /* HTTP method */
@@ -89,10 +88,10 @@ struct _GstSoupHTTPSrc {
 
   GCancellable *cancellable;
   GInputStream *input_stream;
-  gboolean has_pollable_interface;
-  gboolean have_data;
-  GMainContext *poll_context;
-  GSource *poll_source;
+
+  gint reduce_blocksize_count;
+  gint increase_blocksize_count;
+  guint minimum_blocksize;
 
   /* Shoutcast/icecast metadata extraction handling. */
   gboolean iradio_mode;

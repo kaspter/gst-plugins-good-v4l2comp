@@ -832,6 +832,8 @@ gst_deinterlace_reset (GstDeinterlace * self)
   self->need_more = FALSE;
   self->have_eos = FALSE;
 
+  self->discont = TRUE;
+
   gst_deinterlace_set_allocation (self, NULL, NULL, NULL);
 }
 
@@ -1079,7 +1081,7 @@ gst_deinterlace_push_history (GstDeinterlace * self, GstBuffer * buffer)
   GstVideoFrame *frame = NULL;
   GstVideoFrame *field1, *field2 = NULL;
   guint fields_to_push;
-  gint field1_flags, field2_flags;
+  guint field1_flags, field2_flags;
   GstVideoInterlaceMode interlacing_mode;
   guint8 buf_state;
 
@@ -1147,6 +1149,13 @@ gst_deinterlace_push_history (GstDeinterlace * self, GstBuffer * buffer)
     GST_DEBUG_OBJECT (self, "Bottom field first");
     field1_flags = PICTURE_INTERLACED_BOTTOM;
     field2_flags = PICTURE_INTERLACED_TOP;
+  }
+
+  /* Swap for reverse playback */
+  if (self->segment.rate < 0) {
+    field1_flags = field1_flags ^ field2_flags;
+    field2_flags = field1_flags ^ field2_flags;
+    field1_flags = field1_flags ^ field2_flags;
   }
 
   if (!onefield) {
@@ -1281,6 +1290,7 @@ gst_deinterlace_fix_timestamps (GstDeinterlace * self,
   GstVideoFrame *field3, *field4;
   GstVideoInterlaceMode interlacing_mode;
 
+  /* FIXME: This is broken for rate < 0 */
   if (self->pattern_lock && self->pattern > -1) {
     /* accurate pattern-locked timestamp adjustment */
     if (!self->pattern_count)
@@ -1638,6 +1648,10 @@ restart:
         GST_TIME_ARGS (GST_BUFFER_DURATION (field1_buffer)),
         GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (field1_buffer) +
             GST_BUFFER_DURATION (field1_buffer)));
+    if (self->discont) {
+      GST_BUFFER_FLAG_SET (field1_buffer, GST_BUFFER_FLAG_DISCONT);
+      self->discont = FALSE;
+    }
     return gst_pad_push (self->srcpad, field1_buffer);
   } else if (IS_TELECINE (interlacing_mode)
       && GST_VIDEO_FRAME_IS_INTERLACED (field1->frame) && !same_buffer) {
@@ -1736,11 +1750,16 @@ restart:
     if (!IS_TELECINE (interlacing_mode)) {
       timestamp = GST_BUFFER_TIMESTAMP (buf);
 
-      GST_BUFFER_TIMESTAMP (outbuf) = timestamp;
-      if (self->fields == GST_DEINTERLACE_ALL)
+      if (self->fields == GST_DEINTERLACE_ALL) {
+        if (self->segment.rate < 0)
+          GST_BUFFER_TIMESTAMP (outbuf) = timestamp + self->field_duration;
+        else
+          GST_BUFFER_TIMESTAMP (outbuf) = timestamp;
         GST_BUFFER_DURATION (outbuf) = self->field_duration;
-      else
+      } else {
+        GST_BUFFER_TIMESTAMP (outbuf) = timestamp;
         GST_BUFFER_DURATION (outbuf) = 2 * self->field_duration;
+      }
       GST_DEBUG_OBJECT (self,
           "[ADJUST] ts %" GST_TIME_FORMAT ", dur %" GST_TIME_FORMAT ", end %"
           GST_TIME_FORMAT, GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (outbuf)),
@@ -1805,6 +1824,10 @@ restart:
             GST_TIME_ARGS (GST_BUFFER_DURATION (outbuf)),
             GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (outbuf) +
                 GST_BUFFER_DURATION (outbuf)));
+        if (self->discont) {
+          GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_DISCONT);
+          self->discont = FALSE;
+        }
         ret = gst_pad_push (self->srcpad, outbuf);
       } else {
         ret = GST_FLOW_OK;
@@ -1874,7 +1897,10 @@ restart:
       timestamp = GST_BUFFER_TIMESTAMP (buf);
 
       if (self->fields == GST_DEINTERLACE_ALL) {
-        GST_BUFFER_TIMESTAMP (outbuf) = timestamp + self->field_duration;
+        if (self->segment.rate < 0)
+          GST_BUFFER_TIMESTAMP (outbuf) = timestamp;
+        else
+          GST_BUFFER_TIMESTAMP (outbuf) = timestamp + self->field_duration;
         GST_BUFFER_DURATION (outbuf) = self->field_duration;
       } else {
         GST_BUFFER_TIMESTAMP (outbuf) = timestamp;
@@ -2035,11 +2061,16 @@ gst_deinterlace_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
     caps = gst_pad_get_current_caps (self->sinkpad);
     if (caps != NULL) {
       if (!gst_deinterlace_setcaps (self, self->sinkpad, caps)) {
+        gst_pad_mark_reconfigure (self->srcpad);
         gst_caps_unref (caps);
-        return GST_FLOW_NOT_NEGOTIATED;
+        if (GST_PAD_IS_FLUSHING (self->srcpad))
+          return GST_FLOW_FLUSHING;
+        else
+          return GST_FLOW_NOT_NEGOTIATED;
       }
       gst_caps_unref (caps);
     } else {
+      gst_pad_mark_reconfigure (self->srcpad);
       return GST_FLOW_FLUSHING;
     }
   } else {
@@ -2067,6 +2098,7 @@ gst_deinterlace_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
   if (GST_BUFFER_FLAG_IS_SET (buf, GST_BUFFER_FLAG_DISCONT)) {
     GST_DEBUG_OBJECT (self, "DISCONT buffer, resetting history");
     gst_deinterlace_reset_history (self, FALSE);
+    self->discont = TRUE;
   }
 
   gst_deinterlace_push_history (self, buf);
@@ -2736,7 +2768,7 @@ gst_deinterlace_setcaps (GstDeinterlace * self, GstPad * pad, GstCaps * caps)
   }
 
   if (fps_n != 0) {
-    self->field_duration = gst_util_uint64_scale (GST_SECOND, fps_d, fps_n);
+    self->field_duration = gst_util_uint64_scale (GST_SECOND, fps_d, 2 * fps_n);
   } else {
     self->field_duration = 0;
   }
@@ -2761,6 +2793,7 @@ invalid_caps:
     if (peercaps)
       gst_caps_unref (peercaps);
     GST_ERROR_OBJECT (pad, "Invalid caps: %" GST_PTR_FORMAT, caps);
+    gst_pad_mark_reconfigure (self->srcpad);
     return FALSE;
   }
 set_caps_failed:
@@ -2770,6 +2803,7 @@ set_caps_failed:
       gst_caps_unref (peercaps);
     if (srccaps)
       gst_caps_unref (srccaps);
+    gst_pad_mark_reconfigure (self->srcpad);
     return FALSE;
   }
 no_bufferpool:
@@ -2777,6 +2811,7 @@ no_bufferpool:
     GST_ERROR_OBJECT (pad, "could not negotiate bufferpool");
     if (srccaps)
       gst_caps_unref (srccaps);
+    gst_pad_mark_reconfigure (self->srcpad);
     return FALSE;
   }
 }

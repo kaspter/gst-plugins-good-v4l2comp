@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gst-plugins-good-0.10.10.3\n"
 "Report-Msgid-Bugs-To: http://bugzilla.gnome.org/\n"
-"POT-Creation-Date: 2016-03-24 11:27+0200\n"
+"POT-Creation-Date: 2017-01-12 14:38+0200\n"
 "PO-Revision-Date: 2008-10-26 19:09+0100\n"
 "Last-Translator: Michel Bugeja <michelbugeja@rabatmalta.com>\n"
 "Language-Team: Maltese <translation-team-mt@lists.sourceforge.net>\n"
@@ -33,6 +33,9 @@ msgstr "Mhux possibli naqbad mas-server"
 msgid "No URL set."
 msgstr ""
 
+msgid "Corrupted HTTP response."
+msgstr ""
+
 #, fuzzy
 msgid "Server does not support seeking."
 msgstr "Appart '%s' ma jagħmilx video capture"
@@ -54,9 +57,6 @@ msgstr ""
 
 msgid "Server sent bad data."
 msgstr ""
-
-msgid "Internal data stream error."
-msgstr "Problema interna fid-data stream"
 
 msgid "No or invalid input audio, AVI stream will be corrupt."
 msgstr "Input audio ma nstabx jew mhux validu. AVI stream jista jkun korrott."
@@ -85,9 +85,6 @@ msgstr "Jista jkun illi l-vidjo ġo dan il-fajl ma jidhirx sewwa."
 #, c-format
 msgid "This file contains too many streams. Only playing first %d"
 msgstr "Il-fajl fiħ aktar streams milli suppost. Ser indoqq l-ewwel %d"
-
-msgid "Internal data flow error."
-msgstr "Problema interna ta' data flow"
 
 msgid ""
 "No supported stream was found. You might need to install a GStreamer RTSP "
@@ -437,6 +434,12 @@ msgstr "Ma tistax tibdel ir-resolution waqt runtime."
 
 msgid "Cannot operate without a clock"
 msgstr "Ma nistax nħaddem mingħajr arloġġ"
+
+#~ msgid "Internal data stream error."
+#~ msgstr "Problema interna fid-data stream"
+
+#~ msgid "Internal data flow error."
+#~ msgstr "Problema interna ta' data flow"
 
 #, fuzzy
 #~ msgid "Device '%s' does not support video capture"

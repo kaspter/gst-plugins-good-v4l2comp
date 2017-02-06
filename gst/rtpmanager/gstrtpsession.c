@@ -293,13 +293,13 @@ static GstFlowReturn gst_rtp_session_process_rtp (RTPSession * sess,
 static GstFlowReturn gst_rtp_session_send_rtp (RTPSession * sess,
     RTPSource * src, gpointer data, gpointer user_data);
 static GstFlowReturn gst_rtp_session_send_rtcp (RTPSession * sess,
-    RTPSource * src, GstBuffer * buffer, gboolean eos, gpointer user_data);
+    RTPSource * src, GstBuffer * buffer, gpointer user_data);
 static GstFlowReturn gst_rtp_session_sync_rtcp (RTPSession * sess,
     GstBuffer * buffer, gpointer user_data);
 static gint gst_rtp_session_clock_rate (RTPSession * sess, guint8 payload,
     gpointer user_data);
 static void gst_rtp_session_reconsider (RTPSession * sess, gpointer user_data);
-static void gst_rtp_session_request_key_unit (RTPSession * sess,
+static void gst_rtp_session_request_key_unit (RTPSession * sess, guint32 ssrc,
     gboolean all_headers, gpointer user_data);
 static GstClockTime gst_rtp_session_request_time (RTPSession * session,
     gpointer user_data);
@@ -622,9 +622,9 @@ gst_rtp_session_class_init (GstRtpSessionClass * klass)
    * @sess: the object which received the signal
    * @ssrc: the sender SSRC
    *
-   * Since: 1.8
-   *
    * Notify of a new sender SSRC that entered @session.
+   *
+   * Since: 1.8
    */
   gst_rtp_session_signals[SIGNAL_ON_NEW_SENDER_SSRC] =
       g_signal_new ("on-new-sender-ssrc", G_TYPE_FROM_CLASS (klass),
@@ -636,9 +636,9 @@ gst_rtp_session_class_init (GstRtpSessionClass * klass)
    * @sess: the object which received the signal
    * @ssrc: the sender SSRC
    *
-   * Since: 1.8
-   *
    * Notify of a sender SSRC that is active, i.e., sending RTCP.
+   *
+   * Since: 1.8
    */
   gst_rtp_session_signals[SIGNAL_ON_SENDER_SSRC_ACTIVE] =
       g_signal_new ("on-sender-ssrc-active", G_TYPE_FROM_CLASS (klass),
@@ -1074,6 +1074,17 @@ get_current_times (GstRtpSession * rtpsession, GstClockTime * running_time,
     *ntpnstime = ntpns;
 }
 
+/* must be called with GST_RTP_SESSION_LOCK */
+static void
+signal_waiting_rtcp_thread_unlocked (GstRtpSession * rtpsession)
+{
+  if (rtpsession->priv->wait_send) {
+    GST_LOG_OBJECT (rtpsession, "signal RTCP thread");
+    rtpsession->priv->wait_send = FALSE;
+    GST_RTP_SESSION_SIGNAL (rtpsession);
+  }
+}
+
 static void
 rtcp_thread (GstRtpSession * rtpsession)
 {
@@ -1145,6 +1156,22 @@ rtcp_thread (GstRtpSession * rtpsession)
     GST_RTP_SESSION_UNLOCK (rtpsession);
     rtp_session_on_timeout (session, current_time, ntpnstime, running_time);
     GST_RTP_SESSION_LOCK (rtpsession);
+
+    if (!rtp_session_get_num_sources (session)) {
+      /* when no sources left in the session, all of the them have went
+       * BYE at some point and removed, we can send EOS to the
+       * pipeline. */
+      GstPad *rtcp_src = rtpsession->send_rtcp_src;
+
+      if (rtcp_src) {
+        gst_object_ref (rtcp_src);
+        GST_LOG_OBJECT (rtpsession, "sending EOS");
+        GST_RTP_SESSION_UNLOCK (rtpsession);
+        gst_pad_push_event (rtpsession->send_rtcp_src, gst_event_new_eos ());
+        GST_RTP_SESSION_LOCK (rtpsession);
+        gst_object_unref (rtcp_src);
+      }
+    }
   }
   /* mark the thread as stopped now */
   rtpsession->priv->thread_stopped = TRUE;
@@ -1194,8 +1221,7 @@ stop_rtcp_thread (GstRtpSession * rtpsession)
 
   GST_RTP_SESSION_LOCK (rtpsession);
   rtpsession->priv->stop_thread = TRUE;
-  rtpsession->priv->wait_send = FALSE;
-  GST_RTP_SESSION_SIGNAL (rtpsession);
+  signal_waiting_rtcp_thread_unlocked (rtpsession);
   if (rtpsession->priv->id)
     gst_clock_id_unschedule (rtpsession->priv->id);
   GST_RTP_SESSION_UNLOCK (rtpsession);
@@ -1333,11 +1359,7 @@ gst_rtp_session_send_rtp (RTPSession * sess, RTPSource * src,
   GST_RTP_SESSION_LOCK (rtpsession);
   if ((rtp_src = rtpsession->send_rtp_src))
     gst_object_ref (rtp_src);
-  if (rtpsession->priv->wait_send) {
-    GST_LOG_OBJECT (rtpsession, "signal RTCP thread");
-    rtpsession->priv->wait_send = FALSE;
-    GST_RTP_SESSION_SIGNAL (rtpsession);
-  }
+  signal_waiting_rtcp_thread_unlocked (rtpsession);
   GST_RTP_SESSION_UNLOCK (rtpsession);
 
   if (rtp_src) {
@@ -1407,11 +1429,10 @@ do_rtcp_events (GstRtpSession * rtpsession, GstPad * srcpad)
 }
 
 /* called when the session manager has an RTCP packet ready for further
- * sending. The eos flag is set when an EOS event should be sent downstream as
- * well. */
+ * sending. */
 static GstFlowReturn
 gst_rtp_session_send_rtcp (RTPSession * sess, RTPSource * src,
-    GstBuffer * buffer, gboolean eos, gpointer user_data)
+    GstBuffer * buffer, gpointer user_data)
 {
   GstFlowReturn result;
   GstRtpSession *rtpsession;
@@ -1434,11 +1455,6 @@ gst_rtp_session_send_rtcp (RTPSession * sess, RTPSource * src,
     GST_LOG_OBJECT (rtpsession, "sending RTCP");
     result = gst_pad_push (rtcp_src, buffer);
 
-    /* we have to send EOS after this packet */
-    if (eos) {
-      GST_LOG_OBJECT (rtpsession, "sending EOS");
-      gst_pad_push_event (rtcp_src, gst_event_new_eos ());
-    }
     gst_object_unref (rtcp_src);
   } else {
     GST_RTP_SESSION_UNLOCK (rtpsession);
@@ -1901,11 +1917,7 @@ gst_rtp_session_chain_recv_rtp (GstPad * pad, GstObject * parent,
   GST_LOG_OBJECT (rtpsession, "received RTP packet");
 
   GST_RTP_SESSION_LOCK (rtpsession);
-  if (rtpsession->priv->wait_send) {
-    GST_LOG_OBJECT (rtpsession, "signal RTCP thread");
-    rtpsession->priv->wait_send = FALSE;
-    GST_RTP_SESSION_SIGNAL (rtpsession);
-  }
+  signal_waiting_rtcp_thread_unlocked (rtpsession);
   GST_RTP_SESSION_UNLOCK (rtpsession);
 
   /* get NTP time when this packet was captured, this depends on the timestamp. */
@@ -1990,11 +2002,7 @@ gst_rtp_session_chain_recv_rtcp (GstPad * pad, GstObject * parent,
   GST_LOG_OBJECT (rtpsession, "received RTCP packet");
 
   GST_RTP_SESSION_LOCK (rtpsession);
-  if (rtpsession->priv->wait_send) {
-    GST_LOG_OBJECT (rtpsession, "signal RTCP thread");
-    rtpsession->priv->wait_send = FALSE;
-    GST_RTP_SESSION_SIGNAL (rtpsession);
-  }
+  signal_waiting_rtcp_thread_unlocked (rtpsession);
   GST_RTP_SESSION_UNLOCK (rtpsession);
 
   current_time = gst_clock_get_time (priv->sysclock);
@@ -2057,7 +2065,6 @@ gst_rtp_session_event_send_rtcp_src (GstPad * pad, GstObject * parent,
 
   return ret;
 }
-
 
 static gboolean
 gst_rtp_session_event_send_rtp_sink (GstPad * pad, GstObject * parent,
@@ -2640,7 +2647,7 @@ wrong_pad:
 
 static void
 gst_rtp_session_request_key_unit (RTPSession * sess,
-    gboolean all_headers, gpointer user_data)
+    guint32 ssrc, gboolean all_headers, gpointer user_data)
 {
   GstRtpSession *rtpsession = GST_RTP_SESSION (user_data);
   GstEvent *event;
@@ -2653,7 +2660,7 @@ gst_rtp_session_request_key_unit (RTPSession * sess,
 
   if (send_rtp_sink) {
     event = gst_event_new_custom (GST_EVENT_CUSTOM_UPSTREAM,
-        gst_structure_new ("GstForceKeyUnit",
+        gst_structure_new ("GstForceKeyUnit", "ssrc", G_TYPE_UINT, ssrc,
             "all-headers", G_TYPE_BOOLEAN, all_headers, NULL));
     gst_pad_push_event (send_rtp_sink, event);
     gst_object_unref (send_rtp_sink);

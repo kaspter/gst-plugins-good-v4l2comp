@@ -36,20 +36,19 @@ typedef struct _RTPJitterBufferItem RTPJitterBufferItem;
 
 /**
  * RTPJitterBufferMode:
- *
- * RTP_JITTER_BUFFER_MODE_NONE: don't do any skew correction, outgoing
+ * @RTP_JITTER_BUFFER_MODE_NONE: don't do any skew correction, outgoing
  *    timestamps are calculated directly from the RTP timestamps. This mode is
  *    good for recording but not for real-time applications.
- * RTP_JITTER_BUFFER_MODE_SLAVE: calculate the skew between sender and receiver
+ * @RTP_JITTER_BUFFER_MODE_SLAVE: calculate the skew between sender and receiver
  *    and produce smoothed adjusted outgoing timestamps. This mode is good for
  *    low latency communications.
- * RTP_JITTER_BUFFER_MODE_BUFFER: buffer packets between low/high watermarks.
+ * @RTP_JITTER_BUFFER_MODE_BUFFER: buffer packets between low/high watermarks.
  *    This mode is good for streaming communication.
- * RTP_JITTER_BUFFER_MODE_SYNCED: sender and receiver clocks are synchronized,
+ * @RTP_JITTER_BUFFER_MODE_SYNCED: sender and receiver clocks are synchronized,
  *    like #RTP_JITTER_BUFFER_MODE_SLAVE but skew is assumed to be 0. Good for
  *    low latency communication when sender and receiver clocks are
  *    synchronized and there is thus no clock skew.
- * RTP_JITTER_BUFFER_MODE_LAST: last buffer mode.
+ * @RTP_JITTER_BUFFER_MODE_LAST: last buffer mode.
  *
  * The different buffer modes for a jitterbuffer.
  */
@@ -169,8 +168,7 @@ void                  rtp_jitter_buffer_reset_skew       (RTPJitterBuffer *jbuf)
 
 gboolean              rtp_jitter_buffer_insert           (RTPJitterBuffer *jbuf,
                                                           RTPJitterBufferItem *item,
-                                                          gboolean *head, gint *percent,
-                                                          GstClockTime base_time);
+                                                          gboolean *head, gint *percent);
 
 void                  rtp_jitter_buffer_disable_buffering (RTPJitterBuffer *jbuf, gboolean disabled);
 
@@ -190,5 +188,8 @@ guint32               rtp_jitter_buffer_get_ts_diff      (RTPJitterBuffer *jbuf)
 void                  rtp_jitter_buffer_get_sync         (RTPJitterBuffer *jbuf, guint64 *rtptime,
                                                           guint64 *timestamp, guint32 *clock_rate,
                                                           guint64 *last_rtptime);
+
+GstClockTime          rtp_jitter_buffer_calculate_pts    (RTPJitterBuffer * jbuf, GstClockTime dts,
+                                                          guint32 rtptime, GstClockTime base_time);
 
 #endif /* __RTP_JITTER_BUFFER_H__ */

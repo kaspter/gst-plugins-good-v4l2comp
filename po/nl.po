@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gst-plugins-good 1.7.2\n"
 "Report-Msgid-Bugs-To: http://bugzilla.gnome.org/\n"
-"POT-Creation-Date: 2016-03-24 11:27+0200\n"
+"POT-Creation-Date: 2017-01-12 14:38+0200\n"
 "PO-Revision-Date: 2016-02-20 16:40+0100\n"
 "Last-Translator: Freek de Kruijf <f.de.kruijf@gmail.com>\n"
 "Language-Team: Dutch <vertaling@vrijschrift.org>\n"
@@ -34,6 +34,9 @@ msgstr "Kan geen verbinding maken met server"
 msgid "No URL set."
 msgstr "Geen URL ingesteld."
 
+msgid "Corrupted HTTP response."
+msgstr ""
+
 msgid "Server does not support seeking."
 msgstr "Zoeken wordt door de server niet ondersteund."
 
@@ -54,9 +57,6 @@ msgstr ""
 
 msgid "Server sent bad data."
 msgstr "De server stuurde onjuiste gegevens."
-
-msgid "Internal data stream error."
-msgstr "Interne fout in gegevensstroom."
 
 msgid "No or invalid input audio, AVI stream will be corrupt."
 msgstr "Geen of ongeldig invoergeluid, AVI-stroom zal slecht zijn."
@@ -86,9 +86,6 @@ msgstr "De video in dit bestand zal mogelijk niet correct afgespeeld worden."
 msgid "This file contains too many streams. Only playing first %d"
 msgstr ""
 "Dit bestand bevat te veel stromen. Alleen de eerste %d worden afgespeeld."
-
-msgid "Internal data flow error."
-msgstr "Interne fout in de gegevensdoorvoer."
 
 msgid ""
 "No supported stream was found. You might need to install a GStreamer RTSP "
@@ -429,6 +426,12 @@ msgstr "Tijdens het draaien kan de resolutie nog niet gewijzigd worden."
 
 msgid "Cannot operate without a clock"
 msgstr "Kan niet werken zonder een klok."
+
+#~ msgid "Internal data stream error."
+#~ msgstr "Interne fout in gegevensstroom."
+
+#~ msgid "Internal data flow error."
+#~ msgstr "Interne fout in de gegevensdoorvoer."
 
 #~ msgid "Device '%s' does not support video capture"
 #~ msgstr "Apparaat '%s' ondersteunt het opnemen van video niet"

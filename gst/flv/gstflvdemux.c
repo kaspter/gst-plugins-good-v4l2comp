@@ -114,6 +114,8 @@ static gboolean gst_flv_demux_src_event (GstPad * pad, GstObject * parent,
 
 static GstIndex *gst_flv_demux_get_index (GstElement * element);
 
+static void gst_flv_demux_push_tags (GstFlvDemux * demux);
+
 static void
 gst_flv_demux_parse_and_add_index_entry (GstFlvDemux * demux, GstClockTime ts,
     guint64 pos, gboolean keyframe)
@@ -255,13 +257,17 @@ parse_flv_demux_parse_date_string (const gchar * s)
   GstDateTime *dt = NULL;
   gchar **tokens;
   guint64 d;
-  gchar *endptr;
+  gchar *endptr, *stripped;
   gint i, hh, mm, ss;
   gint year = -1, month = -1, day = -1;
   gint hour = -1, minute = -1, seconds = -1;
 
+  stripped = g_strstrip (g_strdup (s));
+
   /* "Fri Oct 15 15:13:16 2004" needs to be parsed */
-  tokens = g_strsplit (s, " ", -1);
+  tokens = g_strsplit (stripped, " ", -1);
+
+  g_free (stripped);
 
   if (g_strv_length (tokens) != 5)
     goto out;
@@ -364,6 +370,12 @@ gst_flv_demux_parse_metadata_item (GstFlvDemux * demux, GstByteReader * reader,
         demux->h = d;
       } else if (!strcmp (tag_name, "framerate")) {
         demux->framerate = d;
+      } else if (!strcmp (tag_name, "audiodatarate")) {
+        gst_tag_list_add (demux->audio_tags, GST_TAG_MERGE_REPLACE,
+            GST_TAG_NOMINAL_BITRATE, (guint) (d * 1024), NULL);
+      } else if (!strcmp (tag_name, "videodatarate")) {
+        gst_tag_list_add (demux->video_tags, GST_TAG_MERGE_REPLACE,
+            GST_TAG_NOMINAL_BITRATE, (guint) (d * 1024), NULL);
       } else {
         GST_INFO_OBJECT (demux, "Tag \'%s\' not handled", tag_name);
       }
@@ -402,8 +414,8 @@ gst_flv_demux_parse_metadata_item (GstFlvDemux * demux, GstByteReader * reader,
         } else {
           gst_tag_list_add (demux->taglist, GST_TAG_MERGE_REPLACE,
               GST_TAG_DATE_TIME, dt, NULL);
+          gst_date_time_unref (dt);
         }
-        gst_date_time_unref (dt);
       } else if (!strcmp (tag_name, "creator")) {
         gst_tag_list_add (demux->taglist, GST_TAG_MERGE_REPLACE,
             GST_TAG_ARTIST, s, NULL);
@@ -557,6 +569,28 @@ error:
   return FALSE;
 }
 
+static void
+gst_flv_demux_clear_tags (GstFlvDemux * demux)
+{
+  GST_DEBUG_OBJECT (demux, "clearing taglist");
+
+  if (demux->taglist) {
+    gst_tag_list_unref (demux->taglist);
+  }
+  demux->taglist = gst_tag_list_new_empty ();
+  gst_tag_list_set_scope (demux->taglist, GST_TAG_SCOPE_GLOBAL);
+
+  if (demux->audio_tags) {
+    gst_tag_list_unref (demux->audio_tags);
+  }
+  demux->audio_tags = gst_tag_list_new_empty ();
+
+  if (demux->video_tags) {
+    gst_tag_list_unref (demux->video_tags);
+  }
+  demux->video_tags = gst_tag_list_new_empty ();
+}
+
 static GstFlowReturn
 gst_flv_demux_parse_tag_script (GstFlvDemux * demux, GstBuffer * buffer)
 {
@@ -589,6 +623,8 @@ gst_flv_demux_parse_tag_script (GstFlvDemux * demux, GstBuffer * buffer)
     if (function_name != NULL && strcmp (function_name, "onMetaData") == 0) {
       gboolean end_marker = FALSE;
       GST_DEBUG_OBJECT (demux, "we have a metadata script object");
+
+      gst_flv_demux_clear_tags (demux);
 
       if (!gst_byte_reader_get_uint8 (&reader, &type)) {
         g_free (function_name);
@@ -632,7 +668,7 @@ gst_flv_demux_parse_tag_script (GstFlvDemux * demux, GstBuffer * buffer)
           goto cleanup;
       }
 
-      demux->push_tags = TRUE;
+      gst_flv_demux_push_tags (demux);
     }
 
     g_free (function_name);
@@ -685,7 +721,6 @@ gst_flv_demux_audio_negotiate (GstFlvDemux * demux, guint32 codec_tag,
     guint32 rate, guint32 channels, guint32 width)
 {
   GstCaps *caps = NULL, *old_caps;
-  gchar *codec_name = NULL;
   gboolean ret = FALSE;
   guint adjusted_rate = rate;
   GstEvent *event;
@@ -867,18 +902,10 @@ done:
     demux->width = width;
 
     if (caps) {
-      codec_name = gst_pb_utils_get_codec_description (caps);
-
-      if (codec_name) {
-        if (demux->taglist == NULL)
-          demux->taglist = gst_tag_list_new_empty ();
-        gst_tag_list_add (demux->taglist, GST_TAG_MERGE_REPLACE,
-            GST_TAG_AUDIO_CODEC, codec_name, NULL);
-        g_free (codec_name);
-      }
-
       GST_DEBUG_OBJECT (demux->audio_pad, "successfully negotiated caps %"
           GST_PTR_FORMAT, caps);
+
+      gst_flv_demux_push_tags (demux);
     } else {
       GST_DEBUG_OBJECT (demux->audio_pad, "delayed setting caps");
     }
@@ -911,25 +938,49 @@ gst_flv_demux_push_src_event (GstFlvDemux * demux, GstEvent * event)
 }
 
 static void
+gst_flv_demux_add_codec_tag (GstFlvDemux * demux, const gchar * tag,
+    GstPad * pad)
+{
+  if (pad) {
+    GstCaps *caps = gst_pad_get_current_caps (pad);
+
+    if (caps) {
+      gchar *codec_name = gst_pb_utils_get_codec_description (caps);
+
+      if (codec_name) {
+        gst_tag_list_add (demux->taglist, GST_TAG_MERGE_REPLACE,
+            tag, codec_name, NULL);
+        g_free (codec_name);
+      }
+
+      gst_caps_unref (caps);
+    }
+  }
+}
+
+static void
 gst_flv_demux_push_tags (GstFlvDemux * demux)
 {
-  if (demux->has_audio && !demux->audio_pad) {
-    GST_DEBUG_OBJECT (demux,
-        "Waiting for audio stream pad to come up before we can push tags");
-    return;
+  gst_flv_demux_add_codec_tag (demux, GST_TAG_AUDIO_CODEC, demux->audio_pad);
+  gst_flv_demux_add_codec_tag (demux, GST_TAG_VIDEO_CODEC, demux->video_pad);
+
+  GST_DEBUG_OBJECT (demux, "pushing %" GST_PTR_FORMAT, demux->taglist);
+
+  gst_flv_demux_push_src_event (demux,
+      gst_event_new_tag (gst_tag_list_copy (demux->taglist)));
+
+  if (demux->audio_pad) {
+    GST_DEBUG_OBJECT (demux->audio_pad, "pushing audio %" GST_PTR_FORMAT,
+        demux->audio_tags);
+    gst_pad_push_event (demux->audio_pad,
+        gst_event_new_tag (gst_tag_list_copy (demux->audio_tags)));
   }
-  if (demux->has_video && !demux->video_pad) {
-    GST_DEBUG_OBJECT (demux,
-        "Waiting for video stream pad to come up before we can push tags");
-    return;
-  }
-  if (demux->taglist) {
-    GST_DEBUG_OBJECT (demux, "pushing tags out %" GST_PTR_FORMAT,
-        demux->taglist);
-    gst_tag_list_set_scope (demux->taglist, GST_TAG_SCOPE_GLOBAL);
-    gst_flv_demux_push_src_event (demux, gst_event_new_tag (demux->taglist));
-    demux->taglist = gst_tag_list_new_empty ();
-    demux->push_tags = FALSE;
+
+  if (demux->video_pad) {
+    GST_DEBUG_OBJECT (demux->video_pad, "pushing video %" GST_PTR_FORMAT,
+        demux->video_tags);
+    gst_pad_push_event (demux->video_pad,
+        gst_event_new_tag (gst_tag_list_copy (demux->video_tags)));
   }
 }
 
@@ -1054,12 +1105,14 @@ gst_flv_demux_parse_tag_audio (GstFlvDemux * demux, GstBuffer * buffer)
         if (demux->audio_codec_data) {
           gst_buffer_unref (demux->audio_codec_data);
         }
-        demux->audio_codec_data = gst_buffer_copy_region (buffer, GST_BUFFER_COPY_MEMORY,
+        demux->audio_codec_data =
+            gst_buffer_copy_region (buffer, GST_BUFFER_COPY_MEMORY,
             7 + codec_data, demux->tag_data_size - codec_data);
 
         /* Use that buffer data in the caps */
         if (demux->audio_pad)
-          gst_flv_demux_audio_negotiate (demux, codec_tag, rate, channels, width);
+          gst_flv_demux_audio_negotiate (demux, codec_tag, rate, channels,
+              width);
         goto beach;
       }
       case 1:
@@ -1131,7 +1184,6 @@ gst_flv_demux_parse_tag_audio (GstFlvDemux * demux, GstBuffer * buffer)
       GST_DEBUG_OBJECT (demux, "emitting no more pads");
       gst_element_no_more_pads (GST_ELEMENT (demux));
       demux->no_more_pads = TRUE;
-      demux->push_tags = TRUE;
     }
   }
 
@@ -1149,10 +1201,6 @@ gst_flv_demux_parse_tag_audio (GstFlvDemux * demux, GstBuffer * buffer)
       goto beach;
     }
   }
-
-  /* Push taglist if present */
-  if (G_UNLIKELY (demux->push_tags))
-    gst_flv_demux_push_tags (demux);
 
   /* Check if we have anything to push */
   if (demux->tag_data_size <= codec_data) {
@@ -1235,7 +1283,6 @@ gst_flv_demux_parse_tag_audio (GstFlvDemux * demux, GstBuffer * buffer)
         " after 6 seconds of audio");
     gst_element_no_more_pads (GST_ELEMENT_CAST (demux));
     demux->no_more_pads = TRUE;
-    demux->push_tags = TRUE;
   }
 
   /* Push downstream */
@@ -1267,7 +1314,6 @@ gst_flv_demux_video_negotiate (GstFlvDemux * demux, guint32 codec_tag)
 {
   gboolean ret = FALSE;
   GstCaps *caps = NULL, *old_caps;
-  gchar *codec_name = NULL;
   GstEvent *event;
   gchar *stream_id;
 
@@ -1296,6 +1342,18 @@ gst_flv_demux_video_negotiate (GstFlvDemux * demux, guint32 codec_tag)
       caps =
           gst_caps_new_simple ("video/x-h264", "stream-format", G_TYPE_STRING,
           "avc", NULL);
+      break;
+      /* The following two are non-standard but apparently used, see in ffmpeg
+       * https://git.videolan.org/?p=ffmpeg.git;a=blob;f=libavformat/flvdec.c;h=2bf1e059e1cbeeb79e4af9542da23f4560e1cf59;hb=b18d6c58000beed872d6bb1fe7d0fbe75ae26aef#l254
+       * https://git.videolan.org/?p=ffmpeg.git;a=blob;f=libavformat/flvdec.c;h=2bf1e059e1cbeeb79e4af9542da23f4560e1cf59;hb=b18d6c58000beed872d6bb1fe7d0fbe75ae26aef#l282
+       */
+    case 8:
+      caps = gst_caps_new_empty_simple ("video/x-h263");
+      break;
+    case 9:
+      caps =
+          gst_caps_new_simple ("video/mpeg", "mpegversion", G_TYPE_INT, 4,
+          "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
       break;
     default:
       GST_WARNING_OBJECT (demux, "unsupported video codec tag %u", codec_tag);
@@ -1360,18 +1418,10 @@ done:
     demux->video_codec_tag = codec_tag;
 
     if (caps) {
-      codec_name = gst_pb_utils_get_codec_description (caps);
-
-      if (codec_name) {
-        if (demux->taglist == NULL)
-          demux->taglist = gst_tag_list_new_empty ();
-        gst_tag_list_add (demux->taglist, GST_TAG_MERGE_REPLACE,
-            GST_TAG_VIDEO_CODEC, codec_name, NULL);
-        g_free (codec_name);
-      }
-
       GST_DEBUG_OBJECT (demux->video_pad, "successfully negotiated caps %"
           GST_PTR_FORMAT, caps);
+
+      gst_flv_demux_push_tags (demux);
     } else {
       GST_DEBUG_OBJECT (demux->video_pad, "delayed setting caps");
     }
@@ -1550,7 +1600,6 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
       GST_DEBUG_OBJECT (demux, "emitting no more pads");
       gst_element_no_more_pads (GST_ELEMENT (demux));
       demux->no_more_pads = TRUE;
-      demux->push_tags = TRUE;
     }
   }
 
@@ -1568,10 +1617,6 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
      * metadata tag that would come later and trigger a caps change */
     demux->got_par = FALSE;
   }
-
-  /* Push taglist if present */
-  if (G_UNLIKELY (demux->push_tags))
-    gst_flv_demux_push_tags (demux);
 
   /* Check if we have anything to push */
   if (demux->tag_data_size <= codec_data) {
@@ -1659,7 +1704,6 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
         " after 6 seconds of video");
     gst_element_no_more_pads (GST_ELEMENT_CAST (demux));
     demux->no_more_pads = TRUE;
-    demux->push_tags = TRUE;
   }
 
   /* Push downstream */
@@ -1907,7 +1951,6 @@ gst_flv_demux_cleanup (GstFlvDemux * demux)
 
   demux->has_audio = FALSE;
   demux->has_video = FALSE;
-  demux->push_tags = FALSE;
   demux->got_par = FALSE;
 
   demux->indexed = FALSE;
@@ -1979,6 +2022,8 @@ gst_flv_demux_cleanup (GstFlvDemux * demux)
     g_array_free (demux->filepositions, TRUE);
     demux->filepositions = NULL;
   }
+
+  gst_flv_demux_clear_tags (demux);
 }
 
 /*
@@ -2684,9 +2729,7 @@ pause:
           GST_WARNING_OBJECT (demux, "failed pushing EOS on streams");
       }
     } else if (ret == GST_FLOW_NOT_LINKED || ret < GST_FLOW_EOS) {
-      GST_ELEMENT_ERROR (demux, STREAM, FAILED,
-          ("Internal data stream error."),
-          ("stream stopped, reason %s", reason));
+      GST_ELEMENT_FLOW_ERROR (demux, ret);
       gst_flv_demux_push_src_event (demux, gst_event_new_eos ());
     }
     gst_object_unref (demux);
@@ -3477,6 +3520,16 @@ gst_flv_demux_dispose (GObject * object)
     demux->taglist = NULL;
   }
 
+  if (demux->audio_tags) {
+    gst_tag_list_unref (demux->audio_tags);
+    demux->audio_tags = NULL;
+  }
+
+  if (demux->video_tags) {
+    gst_tag_list_unref (demux->video_tags);
+    demux->video_tags = NULL;
+  }
+
   if (demux->flowcombiner) {
     gst_flow_combiner_free (demux->flowcombiner);
     demux->flowcombiner = NULL;
@@ -3570,7 +3623,6 @@ gst_flv_demux_init (GstFlvDemux * demux)
   gst_element_add_pad (GST_ELEMENT (demux), demux->sinkpad);
 
   demux->adapter = gst_adapter_new ();
-  demux->taglist = gst_tag_list_new_empty ();
   demux->flowcombiner = gst_flow_combiner_new ();
   gst_segment_init (&demux->segment, GST_FORMAT_TIME);
 

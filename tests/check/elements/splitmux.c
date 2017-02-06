@@ -192,6 +192,20 @@ GST_START_TEST (test_splitmuxsrc_format_location)
 
 GST_END_TEST;
 
+static gchar *
+check_format_location (GstElement * object,
+    guint fragment_id, GstSample * first_sample)
+{
+  GstBuffer *buf = gst_sample_get_buffer (first_sample);
+
+  /* Must have a buffer */
+  fail_if (buf == NULL);
+  GST_LOG ("New file - first buffer %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (buf)));
+
+  return NULL;
+}
+
 GST_START_TEST (test_splitmuxsink)
 {
   GstMessage *msg;
@@ -213,6 +227,8 @@ GST_START_TEST (test_splitmuxsink)
   fail_if (pipeline == NULL);
   sink = gst_bin_get_by_name (GST_BIN (pipeline), "splitsink");
   fail_if (sink == NULL);
+  g_signal_connect (sink, "format-location-full",
+      (GCallback) check_format_location, NULL);
   dest_pattern = g_build_filename (tmpdir, "out%05d.ogg", NULL);
   g_object_set (G_OBJECT (sink), "location", dest_pattern, NULL);
   g_free (dest_pattern);
@@ -287,16 +303,28 @@ splitmux_suite (void)
   Suite *s = suite_create ("splitmux");
   TCase *tc_chain = tcase_create ("general");
   TCase *tc_chain_basic = tcase_create ("basic");
+  gboolean have_theora, have_ogg;
+
+  /* we assume that if encoder/muxer are there, decoder/demuxer will be a well */
+  have_theora = gst_registry_check_feature_version (gst_registry_get (),
+      "theoraenc", GST_VERSION_MAJOR, GST_VERSION_MINOR, 0);
+  have_ogg = gst_registry_check_feature_version (gst_registry_get (),
+      "oggmux", GST_VERSION_MAJOR, GST_VERSION_MINOR, 0);
 
   suite_add_tcase (s, tc_chain);
   suite_add_tcase (s, tc_chain_basic);
 
   tcase_add_test (tc_chain_basic, test_splitmuxsink_reuse_simple);
 
-  tcase_add_checked_fixture (tc_chain, tempdir_setup, tempdir_cleanup);
-  tcase_add_test (tc_chain, test_splitmuxsrc);
-  tcase_add_test (tc_chain, test_splitmuxsrc_format_location);
-  tcase_add_test (tc_chain, test_splitmuxsink);
+  if (have_theora && have_ogg) {
+    tcase_add_checked_fixture (tc_chain, tempdir_setup, tempdir_cleanup);
+
+    tcase_add_test (tc_chain, test_splitmuxsrc);
+    tcase_add_test (tc_chain, test_splitmuxsrc_format_location);
+    tcase_add_test (tc_chain, test_splitmuxsink);
+  } else {
+    GST_INFO ("Skipping tests, missing plugins: theora and/or ogg");
+  }
 
   return s;
 }
