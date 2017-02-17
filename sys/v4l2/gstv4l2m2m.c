@@ -654,6 +654,7 @@ gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
   if (m2m->sink_allocator) {
     gst_v4l2_allocator_flush (m2m->sink_allocator);
     gst_v4l2_allocator_stop (m2m->sink_allocator);
+    gst_object_unref (m2m->sink_allocator);
   }
 
   gst_v4l2_object_stop (m2m->source_obj);
@@ -662,7 +663,9 @@ gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
   if (m2m->source_allocator) {
     gst_v4l2_allocator_flush (m2m->source_allocator);
     gst_v4l2_allocator_stop (m2m->source_allocator);
+    gst_object_unref (m2m->source_allocator);
   }
+
 }
 
 GType

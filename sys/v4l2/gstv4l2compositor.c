@@ -1053,7 +1053,32 @@ static gboolean
 gst_v4l2_compositor_sink_query (GstV4l2Aggregator * agg,
     GstV4l2AggregatorPad * bpad, GstQuery * query)
 {
+  gboolean update;
+  GstBufferPool *pool = NULL;
+  guint size, min, max = 0;
+
   switch (GST_QUERY_TYPE (query)) {
+    case GST_QUERY_ALLOCATION:
+      if (gst_query_get_n_allocation_pools (query) > 0) {
+        gst_query_parse_nth_allocation_pool (query, 0, &pool, &size, &min,
+            &max);
+        update = TRUE;
+      } else {
+        pool = NULL;
+        min = max = 0;
+        size = 0;
+        update = FALSE;
+      }
+
+      if (update)
+        gst_query_set_nth_allocation_pool (query, 0, pool, size, min, max);
+      else
+        gst_query_add_allocation_pool (query, pool, size, min, max);
+
+      if (pool)
+        gst_object_unref (pool);
+
+      return TRUE;
     default:
       return GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_query (agg, bpad,
           query);
