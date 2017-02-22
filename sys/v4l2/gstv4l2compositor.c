@@ -850,6 +850,8 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
+    sinkcaps = gst_pad_get_current_caps (pad);
+
     if (!gst_caps_is_fixed (sinkcaps))
       goto sinkcaps_not_fixed;
 
