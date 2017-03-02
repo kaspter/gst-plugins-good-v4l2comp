@@ -624,8 +624,11 @@ gst_v4l2_m2m_require_streamon (GstV4l2M2m * m2m)
 void
 gst_v4l2_m2m_close (GstV4l2M2m * m2m)
 {
-  if (m2m->dmabuf_allocator)
+  GST_DEBUG_OBJECT (m2m->parent, "In %s (%p)", __func__, m2m);
+  if (m2m->dmabuf_allocator) {
+    GST_DEBUG_OBJECT (m2m->parent, "call unref on dmabuf alloc");
     gst_object_unref (m2m->dmabuf_allocator);
+  }
   m2m->dmabuf_allocator = NULL;
 
   gst_v4l2_object_close (m2m->sink_obj);
