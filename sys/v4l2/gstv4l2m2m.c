@@ -620,6 +620,20 @@ gst_v4l2_m2m_require_streamon (GstV4l2M2m * m2m)
 }
 
 
+gboolean
+gst_v4l2_m2m_open (GstV4l2M2m * m2m)
+{
+  if (!gst_v4l2_object_open (m2m->sink_obj))
+    return FALSE;
+
+  if (!gst_v4l2_object_open_shared (m2m->source_obj, m2m->sink_obj)) {
+    gst_v4l2_object_close (m2m->sink_obj);
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
 
 void
 gst_v4l2_m2m_close (GstV4l2M2m * m2m)

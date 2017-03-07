@@ -961,20 +961,6 @@ failure:
   return FALSE;
 }
 
-gboolean
-gst_v4l2_m2m_open (GstV4l2M2m * m2m)
-{
-  if (!gst_v4l2_object_open (m2m->sink_obj))
-    return FALSE;
-
-  if (!gst_v4l2_object_open_shared (m2m->source_obj, m2m->sink_obj)) {
-    gst_v4l2_object_close (m2m->sink_obj);
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
 static void
 gst_v4l2_compositor_unlock (GstV4l2Compositor * self)
 {
