@@ -962,42 +962,6 @@ failure:
 }
 
 static void
-gst_v4l2_compositor_unlock (GstV4l2Compositor * self)
-{
-  GList *it;
-  GstPad *pad;
-  GstV4l2CompositorPad *cpad;
-
-  GST_DEBUG_OBJECT (self, "Unlock");
-
-  GST_OBJECT_LOCK (self);
-  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
-    pad = it->data;
-    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    gst_v4l2_m2m_unlock (cpad->m2m);
-  }
-  GST_OBJECT_UNLOCK (self);
-}
-
-static void
-gst_v4l2_compositor_unlock_stop (GstV4l2Compositor * self)
-{
-  GList *it;
-  GstPad *pad;
-  GstV4l2CompositorPad *cpad;
-
-  GST_DEBUG_OBJECT (self, "Unlock Stop");
-
-  GST_OBJECT_LOCK (self);
-  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
-    pad = it->data;
-    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    gst_v4l2_m2m_unlock_stop (cpad->m2m);
-  }
-  GST_OBJECT_UNLOCK (self);
-}
-
-static void
 gst_v4l2_compositor_close (GstV4l2Compositor * self)
 {
   GList *it;
@@ -1086,28 +1050,7 @@ gst_v4l2_compositor_sink_event (GstV4l2Aggregator * agg,
   gboolean ret;
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (agg);
 
-  switch (GST_EVENT_TYPE (event)) {
-    case GST_EVENT_FLUSH_START:
-      GST_DEBUG_OBJECT (self, "flush start");
-      gst_v4l2_compositor_unlock (self);
-      break;
-    default:
-      break;
-  }
-
   ret = GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_event (agg, bpad, event);
-
-  switch (GST_EVENT_TYPE (event)) {
-    case GST_EVENT_FLUSH_STOP:
-      /* Buffer should be back now */
-      GST_DEBUG_OBJECT (self, "flush stop");
-      gst_v4l2_compositor_unlock_stop (self);
-      break;
-
-    default:
-      break;
-  }
-
   return ret;
 }
 
@@ -1140,9 +1083,6 @@ gst_v4l2_compositor_change_state (GstElement * element,
     case GST_STATE_CHANGE_NULL_TO_READY:
       if (!gst_v4l2_compositor_open (self))
         return GST_STATE_CHANGE_FAILURE;
-      break;
-    case GST_STATE_CHANGE_PAUSED_TO_READY:
-      gst_v4l2_compositor_unlock (self);
       break;
     default:
       break;
