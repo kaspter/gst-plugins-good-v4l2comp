@@ -654,20 +654,6 @@ gst_v4l2_m2m_close (GstV4l2M2m * m2m)
 }
 
 void
-gst_v4l2_m2m_unlock (GstV4l2M2m * m2m)
-{
-  gst_v4l2_object_unlock (m2m->sink_obj);
-  gst_v4l2_object_unlock (m2m->source_obj);
-}
-
-void
-gst_v4l2_m2m_unlock_stop (GstV4l2M2m * m2m)
-{
-  gst_v4l2_object_unlock_stop (m2m->sink_obj);
-  gst_v4l2_object_unlock_stop (m2m->source_obj);
-}
-
-void
 gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
 {
   gst_v4l2_object_stop (m2m->sink_obj);

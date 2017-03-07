@@ -96,10 +96,7 @@ GstV4l2IOMode gst_v4l2_m2m_get_source_iomode (GstV4l2M2m * m2m);
 /* open/close */
 gboolean gst_v4l2_m2m_open (GstV4l2M2m * m2m);
 void gst_v4l2_m2m_close (GstV4l2M2m * m2m);
-void gst_v4l2_m2m_unlock (GstV4l2M2m * m2m);
-void gst_v4l2_m2m_unlock_stop (GstV4l2M2m * m2m);
 void gst_v4l2_m2m_stop (GstV4l2M2m * m2m);
-
 
 /* specific operations */
 int gst_v4l2_m2m_get_min_source_buffers (GstV4l2M2m * m2m);
