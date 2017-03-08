@@ -33,8 +33,6 @@ GstV4l2M2m *
 gst_v4l2_m2m_new (GstElement * parent, int index)
 {
   GstV4l2M2m *m2m;
-  GstV4l2UpdateFpsFunction update_fps_func = NULL;
-  const char *default_device = NULL;
 
   m2m = (GstV4l2M2m *) g_new0 (GstV4l2M2m, 1);
 
@@ -44,27 +42,21 @@ gst_v4l2_m2m_new (GstElement * parent, int index)
   m2m->sink_iomode = GST_V4L2_IO_AUTO;
   m2m->source_iomode = GST_V4L2_IO_AUTO;
 
-  m2m->sink_obj = gst_v4l2_object_new (parent, V4L2_BUF_TYPE_VIDEO_OUTPUT,
-      default_device, gst_v4l2_get_output, gst_v4l2_set_output,
-      update_fps_func);
-
-  m2m->source_obj = gst_v4l2_object_new (parent, V4L2_BUF_TYPE_VIDEO_CAPTURE,
-      default_device, gst_v4l2_get_input, gst_v4l2_set_input, update_fps_func);
+  m2m->sink_obj = NULL;
+  m2m->source_obj = NULL;
 
   m2m->sink_allocator = NULL;
   m2m->source_allocator = NULL;
   m2m->dmabuf_allocator = NULL;
 
-  m2m->sink_obj->no_initial_format = TRUE;
-  m2m->sink_obj->keep_aspect = FALSE;
-
-  m2m->source_obj->no_initial_format = TRUE;
-  m2m->source_obj->keep_aspect = FALSE;
-
   m2m->streaming = FALSE;
 
   m2m->sink_min_buffers = -1;
   m2m->source_min_buffers = -1;
+
+  m2m->device = NULL;
+
+  m2m->background = 0;
 
   return m2m;
 }
@@ -74,16 +66,8 @@ gst_v4l2_m2m_destroy (GstV4l2M2m * m2m)
 {
   g_return_if_fail (m2m != NULL);
 
-  if (m2m->sink_allocator)
-    gst_object_unref (m2m->sink_allocator);
-  m2m->sink_allocator = NULL;
-
-  if (m2m->source_allocator)
-    gst_object_unref (m2m->source_allocator);
-  m2m->source_allocator = NULL;
-
-  gst_v4l2_object_destroy (m2m->source_obj);
-  gst_v4l2_object_destroy (m2m->sink_obj);
+  if (m2m->device)
+    g_free (m2m->device);
 
   g_free (m2m);
 }
@@ -249,6 +233,21 @@ get_allocator_from_buftype (GstV4l2M2m * m2m,
   }
 }
 
+static gboolean
+gst_v4l2_m2m_open (GstV4l2M2m * m2m)
+{
+  if (!gst_v4l2_object_open (m2m->sink_obj))
+    return FALSE;
+
+  if (!gst_v4l2_object_open_shared (m2m->source_obj, m2m->sink_obj)) {
+    gst_v4l2_object_close (m2m->sink_obj);
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+
 GstV4l2IOMode
 gst_v4l2_m2m_get_sink_iomode (GstV4l2M2m * m2m)
 {
@@ -303,13 +302,39 @@ gst_v4l2_m2m_get_min_source_buffers (GstV4l2M2m * m2m)
 }
 
 gboolean
-gst_v4l2_m2m_setup (GstV4l2M2m * m2m,
+gst_v4l2_m2m_start (GstV4l2M2m * m2m,
     GstCaps * source_caps, GstCaps * sink_caps, int nbufs)
 {
   gboolean ok;
   int ret;
   enum v4l2_memory memory;
   GstV4l2Error error = GST_V4L2_ERROR_INIT;
+  GstV4l2UpdateFpsFunction update_fps_func = NULL;
+  struct v4l2_control control = { 0, };
+
+  m2m->sink_obj = gst_v4l2_object_new (m2m->parent, V4L2_BUF_TYPE_VIDEO_OUTPUT,
+      m2m->device, gst_v4l2_get_output, gst_v4l2_set_output, update_fps_func);
+
+  m2m->sink_obj->no_initial_format = TRUE;
+  m2m->sink_obj->keep_aspect = FALSE;
+  m2m->sink_obj->req_mode = m2m->sink_iomode;
+
+  m2m->source_obj =
+      gst_v4l2_object_new (m2m->parent, V4L2_BUF_TYPE_VIDEO_CAPTURE,
+      m2m->device, gst_v4l2_get_input, gst_v4l2_set_input, update_fps_func);
+
+  m2m->source_obj->no_initial_format = TRUE;
+  m2m->source_obj->keep_aspect = FALSE;
+  m2m->source_obj->req_mode = m2m->source_iomode;
+
+  ok = gst_v4l2_m2m_open (m2m);
+  if (!ok)
+    return FALSE;
+
+  control.id = V4L2_CID_BG_COLOR;
+  control.value = m2m->background;
+  if (v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_S_CTRL, &control) < 0)
+    return FALSE;
 
   ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, &memory);
   if (!ok)
@@ -353,6 +378,54 @@ gst_v4l2_m2m_setup (GstV4l2M2m * m2m,
   return TRUE;
 }
 
+
+
+
+void
+gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
+{
+  GST_DEBUG_OBJECT (m2m->parent, "In %s (%p)", __func__, m2m);
+
+  if (m2m->dmabuf_allocator) {
+    GST_DEBUG_OBJECT (m2m->parent, "call unref on dmabuf alloc");
+    gst_object_unref (m2m->dmabuf_allocator);
+    m2m->dmabuf_allocator = NULL;
+  }
+
+  if (m2m->sink_allocator) {
+    gst_v4l2_allocator_flush (m2m->sink_allocator);
+    gst_v4l2_allocator_stop (m2m->sink_allocator);
+    gst_object_unref (m2m->sink_allocator);
+    m2m->sink_allocator = NULL;
+  }
+
+  if (m2m->source_allocator) {
+    gst_v4l2_allocator_flush (m2m->source_allocator);
+    gst_v4l2_allocator_stop (m2m->source_allocator);
+    gst_object_unref (m2m->source_allocator);
+    m2m->source_allocator = NULL;
+  }
+
+  if (m2m->source_obj) {
+    gst_v4l2_object_stop (m2m->source_obj);
+    v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMOFF,
+        &m2m->source_obj->type);
+    gst_v4l2_object_close (m2m->source_obj);
+    gst_v4l2_object_destroy (m2m->source_obj);
+    m2m->source_obj = NULL;
+  }
+
+  if (m2m->sink_obj) {
+    gst_v4l2_object_stop (m2m->sink_obj);
+    v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMOFF,
+        &m2m->sink_obj->type);
+    gst_v4l2_object_close (m2m->sink_obj);
+    gst_v4l2_object_destroy (m2m->sink_obj);
+    m2m->sink_obj = NULL;
+  }
+}
+
+
 GstVideoInfo *
 gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
     enum GstV4l2M2mBufferType buf_type)
@@ -390,13 +463,7 @@ gst_v4l2_m2m_reset_buffer (GstV4l2M2m * m2m, GstBuffer * buf)
 gboolean
 gst_v4l2_m2m_set_background (GstV4l2M2m * m2m, unsigned int background)
 {
-  struct v4l2_control control = { 0, };
-
-  control.id = V4L2_CID_BG_COLOR;
-  control.value = background;
-  if (v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_S_CTRL, &control) < 0)
-    return FALSE;
-
+  m2m->background = background;
   return TRUE;
 }
 
@@ -529,21 +596,18 @@ void
 gst_v4l2_m2m_set_sink_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode)
 {
   m2m->sink_iomode = mode;
-  m2m->sink_obj->req_mode = mode;
 }
 
 void
 gst_v4l2_m2m_set_source_iomode (GstV4l2M2m * m2m, GstV4l2IOMode mode)
 {
   m2m->source_iomode = mode;
-  m2m->source_obj->req_mode = mode;
 }
 
 void
 gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char *videodev)
 {
-  m2m->source_obj->videodev = g_strdup (videodev);
-  m2m->sink_obj->videodev = g_strdup (videodev);
+  m2m->device = g_strdup (videodev);
 }
 
 gboolean
@@ -623,57 +687,6 @@ gst_v4l2_m2m_require_streamon (GstV4l2M2m * m2m)
   return TRUE;
 }
 
-
-gboolean
-gst_v4l2_m2m_open (GstV4l2M2m * m2m)
-{
-  if (!gst_v4l2_object_open (m2m->sink_obj))
-    return FALSE;
-
-  if (!gst_v4l2_object_open_shared (m2m->source_obj, m2m->sink_obj)) {
-    gst_v4l2_object_close (m2m->sink_obj);
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
-
-void
-gst_v4l2_m2m_close (GstV4l2M2m * m2m)
-{
-  GST_DEBUG_OBJECT (m2m->parent, "In %s (%p)", __func__, m2m);
-  if (m2m->dmabuf_allocator) {
-    GST_DEBUG_OBJECT (m2m->parent, "call unref on dmabuf alloc");
-    gst_object_unref (m2m->dmabuf_allocator);
-  }
-  m2m->dmabuf_allocator = NULL;
-
-  gst_v4l2_object_close (m2m->sink_obj);
-  gst_v4l2_object_close (m2m->source_obj);
-}
-
-void
-gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
-{
-  gst_v4l2_object_stop (m2m->sink_obj);
-  v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMOFF, &m2m->sink_obj->type);
-  if (m2m->sink_allocator) {
-    gst_v4l2_allocator_flush (m2m->sink_allocator);
-    gst_v4l2_allocator_stop (m2m->sink_allocator);
-    gst_object_unref (m2m->sink_allocator);
-  }
-
-  gst_v4l2_object_stop (m2m->source_obj);
-  v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMOFF,
-      &m2m->source_obj->type);
-  if (m2m->source_allocator) {
-    gst_v4l2_allocator_flush (m2m->source_allocator);
-    gst_v4l2_allocator_stop (m2m->source_allocator);
-    gst_object_unref (m2m->source_allocator);
-  }
-
-}
 
 GType
 gst_v4l2_m2m_meta_api_get_type (void)

@@ -857,8 +857,8 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     if (!gst_caps_is_fixed (sinkcaps))
       goto sinkcaps_not_fixed;
 
-    if (!gst_v4l2_m2m_setup (cpad->m2m, self->srccaps, sinkcaps, njobs))
-      goto setup_failed;
+    if (!gst_v4l2_m2m_start (cpad->m2m, self->srccaps, sinkcaps, njobs))
+      goto start_failed;
 
     gst_caps_unref (sinkcaps);
 
@@ -878,8 +878,8 @@ sinkcaps_not_ready:
   GST_ERROR_OBJECT (self, "sink caps not ready: %" GST_PTR_FORMAT, sinkcaps);
   goto end;
 
-setup_failed:
-  GST_ERROR_OBJECT (self, "could not setup m2m");
+start_failed:
+  GST_ERROR_OBJECT (self, "could not start m2m");
   gst_caps_unref (sinkcaps);
   goto failed;
 
@@ -941,9 +941,6 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
     } else {
       gst_v4l2_m2m_set_source_iomode (cpad->m2m, GST_V4L2_IO_DMABUF_IMPORT);
     }
-
-    if (!gst_v4l2_m2m_open (cpad->m2m))
-      goto failure;
   }
 
   if (!gst_v4l2_m2m_set_background (master_cpad->m2m, 0))
@@ -954,32 +951,12 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
 
   GST_OBJECT_UNLOCK (vagg);
   return TRUE;
-
-failure:
-  GST_OBJECT_UNLOCK (vagg);
-  gst_v4l2_compositor_close (self);
-  return FALSE;
 }
 
 static void
 gst_v4l2_compositor_close (GstV4l2Compositor * self)
 {
-  GList *it;
-  GstPad *pad;
-  GstV4l2CompositorPad *cpad;
 
-  GST_DEBUG_OBJECT (self, "Closing");
-
-  GST_OBJECT_LOCK (self);
-
-  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
-    pad = it->data;
-    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-    gst_v4l2_m2m_close (cpad->m2m);
-  }
-  GST_OBJECT_UNLOCK (self);
-
-  gst_caps_replace (&self->srccaps, NULL);
 }
 
 static gboolean
@@ -1048,7 +1025,6 @@ gst_v4l2_compositor_sink_event (GstV4l2Aggregator * agg,
     GstV4l2AggregatorPad * bpad, GstEvent * event)
 {
   gboolean ret;
-  GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (agg);
 
   ret = GST_V4L2_AGGREGATOR_CLASS (parent_class)->sink_event (agg, bpad, event);
   return ret;
@@ -1105,20 +1081,8 @@ static void
 gst_v4l2_compositor_dispose (GObject * object)
 {
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
-  GstPad *pad;
-  GstV4l2CompositorPad *cpad;
-  GList *it;
 
   GST_DEBUG_OBJECT (self, "called");
-
-  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
-    GST_DEBUG_OBJECT (self, "calling destroy");
-    pad = it->data;
-    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
-  }
-
-  gst_caps_replace (&self->srccaps, NULL);
-
   G_OBJECT_CLASS (parent_class)->dispose (object);
 }
 
@@ -1128,7 +1092,6 @@ gst_v4l2_compositor_finalize (GObject * object)
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (object);
 
   GST_DEBUG_OBJECT (self, "called");
-
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
 

@@ -49,6 +49,8 @@ struct _GstV4l2M2m
   int index;
   int sink_min_buffers;
   int source_min_buffers;
+  char *device;
+  unsigned int background;
 };
 
 enum GstV4l2M2mBufferType
@@ -93,19 +95,16 @@ void gst_v4l2_m2m_set_video_device (GstV4l2M2m * m2m, char *videodev);
 GstV4l2IOMode gst_v4l2_m2m_get_sink_iomode (GstV4l2M2m * m2m);
 GstV4l2IOMode gst_v4l2_m2m_get_source_iomode (GstV4l2M2m * m2m);
 
-/* open/close */
-gboolean gst_v4l2_m2m_open (GstV4l2M2m * m2m);
-void gst_v4l2_m2m_close (GstV4l2M2m * m2m);
+/* start/stop */
+gboolean gst_v4l2_m2m_start (GstV4l2M2m * m2m,
+                             GstCaps * source_caps, GstCaps * sink_caps,
+                             int nbufs);
 void gst_v4l2_m2m_stop (GstV4l2M2m * m2m);
 
 /* specific operations */
 int gst_v4l2_m2m_get_min_source_buffers (GstV4l2M2m * m2m);
 
 int gst_v4l2_m2m_get_min_sink_buffers (GstV4l2M2m * m2m);
-
-gboolean gst_v4l2_m2m_setup (GstV4l2M2m * m2m,
-                             GstCaps * source_caps, GstCaps * sink_caps,
-                             int nbufs);
 
 GstVideoInfo *
 gst_v4l2_m2m_get_video_info (GstV4l2M2m * m2m,
