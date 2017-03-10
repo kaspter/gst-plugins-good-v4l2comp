@@ -234,7 +234,7 @@ get_allocator_from_buftype (GstV4l2M2m * m2m,
 }
 
 static gboolean
-gst_v4l2_m2m_open (GstV4l2M2m * m2m)
+gst_v4l2_m2m_open_objects (GstV4l2M2m * m2m)
 {
   if (!gst_v4l2_object_open (m2m->sink_obj))
     return FALSE;
@@ -302,7 +302,7 @@ gst_v4l2_m2m_get_min_source_buffers (GstV4l2M2m * m2m)
 }
 
 gboolean
-gst_v4l2_m2m_start (GstV4l2M2m * m2m,
+gst_v4l2_m2m_open (GstV4l2M2m * m2m,
     GstCaps * source_caps, GstCaps * sink_caps, int nbufs)
 {
   gboolean ok;
@@ -327,7 +327,7 @@ gst_v4l2_m2m_start (GstV4l2M2m * m2m,
   m2m->source_obj->keep_aspect = FALSE;
   m2m->source_obj->req_mode = m2m->source_iomode;
 
-  ok = gst_v4l2_m2m_open (m2m);
+  ok = gst_v4l2_m2m_open_objects (m2m);
   if (!ok)
     return FALSE;
 
@@ -379,49 +379,58 @@ gst_v4l2_m2m_start (GstV4l2M2m * m2m,
 }
 
 
+void
+gst_v4l2_m2m_flush (GstV4l2M2m * m2m)
+{
+  GST_DEBUG_OBJECT (m2m->parent, "In %s (%p)", __func__, m2m);
+
+  gst_v4l2_allocator_flush (m2m->sink_allocator);
+  gst_v4l2_allocator_flush (m2m->source_allocator);
+}
 
 
 void
 gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
 {
+  gst_v4l2_object_stop (m2m->source_obj);
+  gst_v4l2_object_stop (m2m->sink_obj);
+
+  gst_v4l2_allocator_stop (m2m->source_allocator);
+  gst_v4l2_allocator_stop (m2m->sink_allocator);
+}
+
+
+void
+gst_v4l2_m2m_close (GstV4l2M2m * m2m)
+{
   GST_DEBUG_OBJECT (m2m->parent, "In %s (%p)", __func__, m2m);
 
-  if (m2m->dmabuf_allocator) {
-    GST_DEBUG_OBJECT (m2m->parent, "call unref on dmabuf alloc");
-    gst_object_unref (m2m->dmabuf_allocator);
-    m2m->dmabuf_allocator = NULL;
-  }
-
-  if (m2m->sink_allocator) {
-    gst_v4l2_allocator_flush (m2m->sink_allocator);
-    gst_v4l2_allocator_stop (m2m->sink_allocator);
-    gst_object_unref (m2m->sink_allocator);
-    m2m->sink_allocator = NULL;
-  }
-
-  if (m2m->source_allocator) {
-    gst_v4l2_allocator_flush (m2m->source_allocator);
-    gst_v4l2_allocator_stop (m2m->source_allocator);
-    gst_object_unref (m2m->source_allocator);
-    m2m->source_allocator = NULL;
-  }
-
   if (m2m->source_obj) {
-    gst_v4l2_object_stop (m2m->source_obj);
-    v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMOFF,
-        &m2m->source_obj->type);
     gst_v4l2_object_close (m2m->source_obj);
     gst_v4l2_object_destroy (m2m->source_obj);
     m2m->source_obj = NULL;
   }
 
   if (m2m->sink_obj) {
-    gst_v4l2_object_stop (m2m->sink_obj);
-    v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMOFF,
-        &m2m->sink_obj->type);
     gst_v4l2_object_close (m2m->sink_obj);
     gst_v4l2_object_destroy (m2m->sink_obj);
     m2m->sink_obj = NULL;
+  }
+
+  if (m2m->sink_allocator) {
+    gst_object_unref (m2m->sink_allocator);
+    m2m->sink_allocator = NULL;
+  }
+
+  if (m2m->source_allocator) {
+    gst_object_unref (m2m->source_allocator);
+    m2m->source_allocator = NULL;
+  }
+
+  if (m2m->dmabuf_allocator) {
+    GST_DEBUG_OBJECT (m2m->parent, "call unref on dmabuf alloc");
+    gst_object_unref (m2m->dmabuf_allocator);
+    m2m->dmabuf_allocator = NULL;
   }
 }
 
@@ -686,6 +695,34 @@ gst_v4l2_m2m_require_streamon (GstV4l2M2m * m2m)
 
   return TRUE;
 }
+
+
+gboolean
+gst_v4l2_m2m_require_streamoff (GstV4l2M2m * m2m)
+{
+  int ret;
+
+  if (!m2m->streaming)
+    return TRUE;
+
+  ret = v4l2_ioctl (m2m->sink_obj->video_fd, VIDIOC_STREAMOFF,
+      &m2m->sink_obj->type);
+  if (ret < 0)
+    return FALSE;
+
+  ret = v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_STREAMOFF,
+      &m2m->source_obj->type);
+  if (ret < 0)
+    return FALSE;
+
+  m2m->streaming = FALSE;
+
+  return TRUE;
+}
+
+
+
+
 
 
 GType

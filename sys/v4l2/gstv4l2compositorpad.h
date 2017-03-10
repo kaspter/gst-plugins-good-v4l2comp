@@ -46,6 +46,9 @@ enum _GstV4l2CompositorJobState
   GST_V4L2_COMPOSITOR_JOB_PREPARED,
   GST_V4L2_COMPOSITOR_JOB_QUEUED,
   GST_V4L2_COMPOSITOR_JOB_GONE,
+  GST_V4L2_COMPOSITOR_JOB_BACK,
+  GST_V4L2_COMPOSITOR_JOB_FLUSHED,
+  GST_V4L2_COMPOSITOR_JOB_CLEANUP,
 };
 typedef enum _GstV4l2CompositorJobState GstV4l2CompositorJobState;
 
@@ -72,6 +75,7 @@ struct _GstV4l2CompositorPad
   GList *jobs;
   GList *prepared_jobs;
   GList *queued_jobs;
+  int index;
 
   /* properties */
   gint xpos, ypos;
