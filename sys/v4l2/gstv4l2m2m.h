@@ -96,9 +96,13 @@ GstV4l2IOMode gst_v4l2_m2m_get_sink_iomode (GstV4l2M2m * m2m);
 GstV4l2IOMode gst_v4l2_m2m_get_source_iomode (GstV4l2M2m * m2m);
 
 /* start/stop */
-gboolean gst_v4l2_m2m_start (GstV4l2M2m * m2m,
+gboolean gst_v4l2_m2m_open  (GstV4l2M2m * m2m,
                              GstCaps * source_caps, GstCaps * sink_caps,
                              int nbufs);
+void gst_v4l2_m2m_close (GstV4l2M2m * m2m);
+
+/* flush/stop */
+void gst_v4l2_m2m_flush (GstV4l2M2m * m2m);
 void gst_v4l2_m2m_stop (GstV4l2M2m * m2m);
 
 /* specific operations */
@@ -118,6 +122,7 @@ gboolean gst_v4l2_m2m_qbuf (GstV4l2M2m * m2m, GstBuffer * buf);
 gboolean gst_v4l2_m2m_dqbuf (GstV4l2M2m * m2m, GstBuffer * buf);
 
 gboolean gst_v4l2_m2m_require_streamon (GstV4l2M2m * m2m);
+gboolean gst_v4l2_m2m_require_streamoff (GstV4l2M2m * m2m);
 
 gboolean gst_v4l2_m2m_reset_buffer (GstV4l2M2m * m2m, GstBuffer * buf);
 
