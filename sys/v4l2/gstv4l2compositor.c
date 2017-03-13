@@ -25,6 +25,10 @@
 #include "gstv4l2compositorpad.h"
 #include "v4l2_calls.h"
 
+#ifdef GST_V4L2_COMPOSITOR_DEBUG
+#include <glib/gprintf.h>
+#endif
+
 GST_DEBUG_CATEGORY_STATIC (gst_v4l2compositor_debug);
 #define GST_CAT_DEFAULT gst_v4l2compositor_debug
 
@@ -484,6 +488,43 @@ gst_v4l2_compositor_recycle_jobs (GstV4l2Compositor * self)
 
   return result;
 }
+
+
+#ifdef GST_V4L2_COMPOSITOR_DEBUG
+
+static GstV4l2Compositor *gst_v4l2_compositor_instance = NULL;
+
+static void
+gst_v4l2_compositor_dump_job_states (void)
+{
+  GList *it;
+  GList *it2;
+  GstV4l2CompositorJob *job;
+  GstV4l2VideoAggregatorPad *pad;
+  GstV4l2CompositorPad *cpad;
+  int idx;
+  GstV4l2Compositor *self = gst_v4l2_compositor_instance;
+
+  static const char chars[] = "RPQGBFC";
+
+  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
+    pad = it->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+
+    g_printf ("[Pad #%d] ", cpad->index);
+    for (it2 = cpad->jobs; it2; it2 = it2->next) {
+      job = it2->data;
+      idx = (int) (job->state);
+      g_printf ("%c", chars[idx]);
+    }
+    g_printf ("\n");
+  }
+  g_printf ("\n");
+}
+
+#endif /* GST_V4L2_COMPOSITOR_DEBUG */
+
+
 
 static gboolean
 gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
@@ -1275,6 +1316,9 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->number_of_sinkpads = -1;
   self->number_of_jobs = 0;
   self->prop_number_of_jobs = DEFAULT_PROP_NUMJOBS;
+#ifdef GST_V4L2_COMPOSITOR_DEBUG
+  gst_v4l2_compositor_instance = self;
+#endif
 }
 
 /* GObject boilerplate */
