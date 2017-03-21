@@ -56,7 +56,7 @@ gst_v4l2_m2m_new (GstElement * parent, int index)
 
   m2m->device = NULL;
 
-  m2m->background = 0;
+  m2m->background_enabled = FALSE;
 
   return m2m;
 }
@@ -331,10 +331,12 @@ gst_v4l2_m2m_open (GstV4l2M2m * m2m,
   if (!ok)
     return FALSE;
 
-  control.id = V4L2_CID_BG_COLOR;
-  control.value = m2m->background;
-  if (v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_S_CTRL, &control) < 0)
-    return FALSE;
+  if (m2m->background_enabled) {
+    control.id = V4L2_CID_BG_COLOR;
+    control.value = m2m->background_color;
+    if (v4l2_ioctl (m2m->source_obj->video_fd, VIDIOC_S_CTRL, &control) < 0)
+      return FALSE;
+  }
 
   ok = get_v4l2_memory (m2m, GST_V4L2_M2M_BUFTYPE_SOURCE, &memory);
   if (!ok)
@@ -470,9 +472,10 @@ gst_v4l2_m2m_reset_buffer (GstV4l2M2m * m2m, GstBuffer * buf)
 }
 
 gboolean
-gst_v4l2_m2m_set_background (GstV4l2M2m * m2m, unsigned int background)
+gst_v4l2_m2m_set_background (GstV4l2M2m * m2m, guint32 background_color)
 {
-  m2m->background = background;
+  m2m->background_color = background_color;
+  m2m->background_enabled = TRUE;
   return TRUE;
 }
 
