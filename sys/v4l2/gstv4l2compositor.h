@@ -55,6 +55,8 @@ struct _GstV4l2Compositor
   int number_of_sinkpads;
   int number_of_jobs;
   int prop_number_of_jobs;
+  guint32 bgcolor;
+  int bgmethod;
 };
 
 struct _GstV4l2CompositorClass

@@ -206,11 +206,19 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
 /* GstV4l2Compositor */
 #define DEFAULT_PROP_DEVICE   "/dev/video0"
 #define DEFAULT_PROP_NUMJOBS  0
+#define DEFAULT_PROP_BGCOLOR  0
+
+#define PROP_BGMETHOD_DISABLED 0
+#define PROP_BGMETHOD_DRIVER   1
+#define DEFAULT_PROP_BGMETHOD  PROP_BGMETHOD_DISABLED
+
 enum
 {
   PROP_0,
   PROP_DEVICE,
   PROP_NUMJOBS,
+  PROP_BGCOLOR,
+  PROP_BGMETHOD,
 };
 
 static void
@@ -225,6 +233,12 @@ gst_v4l2_compositor_get_property (GObject * object,
       break;
     case PROP_NUMJOBS:
       g_value_set_int (value, self->prop_number_of_jobs);
+      break;
+    case PROP_BGCOLOR:
+      g_value_set_int (value, self->bgcolor);
+      break;
+    case PROP_BGMETHOD:
+      g_value_set_int (value, self->bgmethod);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -262,6 +276,12 @@ gst_v4l2_compositor_set_property (GObject * object,
       break;
     case PROP_NUMJOBS:
       self->prop_number_of_jobs = g_value_get_int (value);
+      break;
+    case PROP_BGCOLOR:
+      self->bgcolor = g_value_get_uint (value);
+      break;
+    case PROP_BGMETHOD:
+      self->bgmethod = g_value_get_int (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1046,6 +1066,7 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
   GstV4l2CompositorPad *cpad;
   GstV4l2CompositorPad *master_cpad;
   int num;
+  gboolean ok;
 
   GST_DEBUG_OBJECT (self, "Opening");
 
@@ -1078,8 +1099,13 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
     }
   }
 
-  if (!gst_v4l2_m2m_set_background (master_cpad->m2m, 0))
-    GST_DEBUG_OBJECT (self, "could not set background color");
+  if (self->bgmethod == PROP_BGMETHOD_DRIVER) {
+    ok = gst_v4l2_m2m_set_background (master_cpad->m2m, self->bgcolor);
+    if (!ok) {
+      GST_ERROR_OBJECT (self, "could not set background color");
+      return FALSE;
+    }
+  }
 
   self->already_negotiated = FALSE;
   self->master_cpad = NULL;
@@ -1316,6 +1342,8 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->number_of_sinkpads = -1;
   self->number_of_jobs = 0;
   self->prop_number_of_jobs = DEFAULT_PROP_NUMJOBS;
+  self->bgcolor = DEFAULT_PROP_BGCOLOR;
+  self->bgmethod = DEFAULT_PROP_BGMETHOD;
 #ifdef GST_V4L2_COMPOSITOR_DEBUG
   gst_v4l2_compositor_instance = self;
 #endif
@@ -1380,4 +1408,12 @@ gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class)
   g_object_class_install_property (gobject_class, PROP_NUMJOBS,
       g_param_spec_int ("num_jobs", "num_jobs", "num_jobs",
           0, G_MAXINT, DEFAULT_PROP_NUMJOBS, G_PARAM_READWRITE));
+
+  g_object_class_install_property (gobject_class, PROP_BGCOLOR,
+      g_param_spec_uint ("bgcolor", "bgcolor", "RGB color code",
+          0, G_MAXUINT, DEFAULT_PROP_BGCOLOR, G_PARAM_READWRITE));
+
+  g_object_class_install_property (gobject_class, PROP_BGMETHOD,
+      g_param_spec_int ("bgmethod", "bgmethod", "0: disabled, 1: driver",
+          0, 1, DEFAULT_PROP_BGMETHOD, G_PARAM_READWRITE));
 }
