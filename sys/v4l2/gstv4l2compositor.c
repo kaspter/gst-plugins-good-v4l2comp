@@ -558,33 +558,16 @@ static gboolean
 gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
 {
   GList *it;
-  GList *it2;
   GstV4l2CompositorJob *job;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
   GstBuffer *external_sink_buf;
-  gboolean found;
 
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
     external_sink_buf = pad->buffer;
     if (external_sink_buf == NULL)
-      continue;
-
-    found = FALSE;
-    for (it2 = cpad->jobs; it2; it2 = it2->next) {
-      job = it2->data;
-      if ((job->state != GST_V4L2_COMPOSITOR_JOB_PREPARED)
-          && (job->state != GST_V4L2_COMPOSITOR_JOB_QUEUED))
-        continue;
-      if (external_sink_buf == job->external_sink_buf) {
-        found = TRUE;
-        break;
-      }
-    }
-
-    if (found)
       continue;
 
     job = gst_v4l2_compositor_lookup_job (self, cpad);
@@ -758,7 +741,10 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self,
       job->external_sink_buf = NULL;
     }
 
-    job->state = GST_V4L2_COMPOSITOR_JOB_READY;
+    if (job == (*outjob))
+      job->state = GST_V4L2_COMPOSITOR_JOB_GONE;
+    else
+      job->state = GST_V4L2_COMPOSITOR_JOB_READY;
     job->master_job = NULL;
     cpad->queued_jobs = g_list_remove (cpad->queued_jobs, job);
   }
@@ -1000,7 +986,6 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     emeta = gst_v4l2_m2m_get_meta (outbuf);
     emeta->user_data = (gpointer) outjob;
     emeta->dispose = gst_v4l2_compositor_dispose_output_buffer;
-    outjob->state = GST_V4L2_COMPOSITOR_JOB_GONE;
     (*outbuf_p) = outbuf;
   }
 
