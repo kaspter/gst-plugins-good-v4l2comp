@@ -386,19 +386,25 @@ gst_v4l2_m2m_flush (GstV4l2M2m * m2m)
 {
   GST_DEBUG_OBJECT (m2m->parent, "In %s (%p)", __func__, m2m);
 
-  gst_v4l2_allocator_flush (m2m->sink_allocator);
-  gst_v4l2_allocator_flush (m2m->source_allocator);
+  if (m2m->sink_allocator)
+    gst_v4l2_allocator_flush (m2m->sink_allocator);
+  if (m2m->source_allocator)
+    gst_v4l2_allocator_flush (m2m->source_allocator);
 }
 
 
 void
 gst_v4l2_m2m_stop (GstV4l2M2m * m2m)
 {
-  gst_v4l2_object_stop (m2m->source_obj);
-  gst_v4l2_object_stop (m2m->sink_obj);
+  if (m2m->source_obj)
+    gst_v4l2_object_stop (m2m->source_obj);
+  if (m2m->sink_obj)
+    gst_v4l2_object_stop (m2m->sink_obj);
 
-  gst_v4l2_allocator_stop (m2m->source_allocator);
-  gst_v4l2_allocator_stop (m2m->sink_allocator);
+  if (m2m->source_allocator)
+    gst_v4l2_allocator_stop (m2m->source_allocator);
+  if (m2m->sink_allocator)
+    gst_v4l2_allocator_stop (m2m->sink_allocator);
 }
 
 
