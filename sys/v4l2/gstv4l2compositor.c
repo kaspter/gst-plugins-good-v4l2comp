@@ -243,7 +243,7 @@ gst_v4l2_compositor_get_property (GObject * object,
       g_value_set_int (value, self->prop_number_of_jobs);
       break;
     case PROP_BGCOLOR:
-      g_value_set_int (value, self->background_color);
+      g_value_set_uint (value, self->background_color);
       break;
     case PROP_BGMETHOD:
       g_value_set_int (value, self->background_method);
