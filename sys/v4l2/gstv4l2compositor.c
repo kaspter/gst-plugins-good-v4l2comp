@@ -518,12 +518,8 @@ gst_v4l2_compositor_recycle_jobs (GstV4l2Compositor * self)
 }
 
 
-#ifdef GST_V4L2_COMPOSITOR_DEBUG
-
-static GstV4l2Compositor *gst_v4l2_compositor_instance = NULL;
-
 static void
-gst_v4l2_compositor_dump_job_states (void)
+gst_v4l2_compositor_dump_job_states (GstV4l2Compositor * self)
 {
   GList *it;
   GList *it2;
@@ -531,7 +527,9 @@ gst_v4l2_compositor_dump_job_states (void)
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
   int idx;
-  GstV4l2Compositor *self = gst_v4l2_compositor_instance;
+  gchar buf[100];
+  gchar *ptr;
+  int cnt;
 
   static const char chars[] = "RPQGBFC";
 
@@ -539,19 +537,20 @@ gst_v4l2_compositor_dump_job_states (void)
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
-    g_printf ("[Pad #%d] ", cpad->index);
+    ptr = buf;
+    cnt = g_sprintf (ptr, "[Pad #%d] ", cpad->index);
+    ptr += cnt;
+
     for (it2 = cpad->jobs; it2; it2 = it2->next) {
       job = it2->data;
       idx = (int) (job->state);
-      g_printf ("%c", chars[idx]);
+      cnt = g_sprintf (ptr, "%c", chars[idx]);
+      ptr += cnt;
     }
-    g_printf ("\n");
+
+    GST_ERROR_OBJECT (self, "%s", buf);
   }
-  g_printf ("\n");
 }
-
-#endif /* GST_V4L2_COMPOSITOR_DEBUG */
-
 
 
 static gboolean
@@ -939,6 +938,9 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   GST_OBJECT_LOCK (vagg);
 
   (*outbuf_p) = NULL;
+
+  gst_v4l2_compositor_dump_job_states (self);
+
 
   is_eos = gst_v4l2_compositor_is_eos (self);
   if (is_eos)
@@ -1393,9 +1395,6 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->background_color = DEFAULT_PROP_BGCOLOR;
   self->background_method = DEFAULT_PROP_BGMETHOD;
   self->soft_background_done = FALSE;
-#ifdef GST_V4L2_COMPOSITOR_DEBUG
-  gst_v4l2_compositor_instance = self;
-#endif
 }
 
 /* GObject boilerplate */
