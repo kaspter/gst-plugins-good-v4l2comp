@@ -533,11 +533,11 @@ gst_v4l2_compositor_dump_job_states (GstV4l2Compositor * self)
 
   static const char chars[] = "RPQGBFC";
 
+  ptr = buf;
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
     cpad = GST_V4L2_COMPOSITOR_PAD (pad);
 
-    ptr = buf;
     cnt = g_sprintf (ptr, "[Pad #%d] ", cpad->index);
     ptr += cnt;
 
@@ -548,8 +548,10 @@ gst_v4l2_compositor_dump_job_states (GstV4l2Compositor * self)
       ptr += cnt;
     }
 
-    GST_ERROR_OBJECT (self, "%s", buf);
+    cnt = g_sprintf (ptr, "\t");
+    ptr += cnt;
   }
+  GST_ERROR_OBJECT (self, "%s", buf);
 }
 
 
