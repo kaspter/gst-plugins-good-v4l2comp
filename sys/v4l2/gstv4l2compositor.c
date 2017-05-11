@@ -936,13 +936,17 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   GstV4l2CompositorJob *outjob;
   GstBuffer *outbuf;
   GstV4l2M2mMeta *emeta;
+  static int count = 100;
 
   GST_OBJECT_LOCK (vagg);
 
   (*outbuf_p) = NULL;
 
-  gst_v4l2_compositor_dump_job_states (self);
-
+  if ((count >= 20) && (count <= 60))
+    gst_v4l2_compositor_dump_job_states (self);
+  count++;
+  if (count > 300)
+    count = 0;
 
   is_eos = gst_v4l2_compositor_is_eos (self);
   if (is_eos)
