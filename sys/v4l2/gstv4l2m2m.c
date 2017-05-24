@@ -607,6 +607,11 @@ gst_v4l2_m2m_import_buffer (GstV4l2M2m * m2m, GstBuffer * our_buf,
   if (!ok)
     return FALSE;
 
+  ok = gst_buffer_copy_into (our_buf, external_buf,
+      GST_BUFFER_COPY_FLAGS | GST_BUFFER_COPY_TIMESTAMPS, 0, -1);
+  if (!ok)
+    return FALSE;
+
   return TRUE;
 }
 
