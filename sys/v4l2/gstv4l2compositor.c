@@ -519,6 +519,55 @@ gst_v4l2_compositor_recycle_jobs (GstV4l2Compositor * self)
 }
 
 
+static GstClockTimeDiff
+gst_v4l2_compositor_compute_desync (GstV4l2Compositor * self,
+    GstClockTime * min_pts_p, GstClockTime * max_pts_p)
+{
+  GstClockTime min_pts;
+  GstClockTime max_pts;
+  GList *it;
+  GstV4l2CompositorJob *job;
+  GstV4l2VideoAggregatorPad *pad;
+  GstV4l2CompositorPad *cpad;
+  GstClockTimeDiff desync;
+
+  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
+    pad = it->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+    job = g_list_nth_data (cpad->prepared_jobs, 0);
+    if (job == NULL)
+      goto time_none;
+    if (!GST_CLOCK_TIME_IS_VALID (job->pts)) {
+      GST_WARNING_OBJECT (self, "invalid PTS");
+      goto time_none;
+    }
+    if (cpad->index == 0) {
+      min_pts = job->pts;
+      max_pts = job->pts;
+    } else {
+      if (job->pts < min_pts)
+        min_pts = job->pts;
+      if (job->pts > max_pts)
+        max_pts = job->pts;
+    }
+  }
+  desync = GST_CLOCK_DIFF (min_pts, max_pts);
+  goto end;
+
+time_none:
+  min_pts = GST_CLOCK_TIME_NONE;
+  max_pts = GST_CLOCK_TIME_NONE;
+  desync = GST_CLOCK_TIME_NONE;
+
+end:
+  if (min_pts_p != NULL)
+    (*min_pts_p) = min_pts;
+  if (max_pts_p != NULL)
+    (*max_pts_p) = max_pts;
+  return desync;
+}
+
+
 #ifdef GST_V4L2_COMPOSITOR_DEBUG
 
 static GstV4l2Compositor *gst_v4l2_compositor_instance = NULL;
@@ -532,9 +581,14 @@ gst_v4l2_compositor_dump_job_states (void)
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
   int idx;
+  GstClockTime min_pts;
+  GstClockTime max_pts;
+  GstClockTime desync;
   GstV4l2Compositor *self = gst_v4l2_compositor_instance;
 
   static const char chars[] = "RPQGBFC";
+
+  desync = gst_v4l2_compositor_compute_desync (self, &min_pts, &max_pts);
 
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
@@ -548,6 +602,10 @@ gst_v4l2_compositor_dump_job_states (void)
     }
     g_printf ("\n");
   }
+  g_printf ("* desync=%dms min_pts=%dms max_pts=%dms\n",
+      (int) GST_TIME_AS_MSECONDS (desync),
+      (int) GST_TIME_AS_MSECONDS (min_pts),
+      (int) GST_TIME_AS_MSECONDS (max_pts));
   g_printf ("\n");
 }
 
@@ -968,6 +1026,10 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     GST_ERROR_OBJECT (self, "gst_v4l2_compositor_prepare_jobs() failed");
     goto failed;
   }
+#ifdef GST_V4L2_COMPOSITOR_DEBUG
+  if ((self->get_output_buffer_count % 30) == 0)
+    gst_v4l2_compositor_dump_job_states ();
+#endif
 
   ok = gst_v4l2_compositor_queue_jobs (self);
   if (!ok) {
