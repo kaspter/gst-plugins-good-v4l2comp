@@ -921,11 +921,6 @@ gst_v4l2_compositor_process_soft_background (GstV4l2Compositor * self)
 }
 
 
-
-
-
-
-
 static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     GstBuffer ** outbuf_p)
@@ -935,6 +930,8 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   GstV4l2CompositorJob *outjob;
   GstBuffer *outbuf;
   GstV4l2M2mMeta *emeta;
+
+  self->get_output_buffer_count++;
 
   GST_OBJECT_LOCK (vagg);
 
@@ -1393,6 +1390,7 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->background_color = DEFAULT_PROP_BGCOLOR;
   self->background_method = DEFAULT_PROP_BGMETHOD;
   self->soft_background_done = FALSE;
+  self->get_output_buffer_count = 0;
 #ifdef GST_V4L2_COMPOSITOR_DEBUG
   gst_v4l2_compositor_instance = self;
 #endif

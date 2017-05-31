@@ -58,6 +58,7 @@ struct _GstV4l2Compositor
   guint32 background_color;
   int background_method;
   gboolean soft_background_done;
+  guint32 get_output_buffer_count;
 };
 
 struct _GstV4l2CompositorClass
