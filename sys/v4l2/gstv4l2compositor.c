@@ -211,7 +211,7 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
 #define DEFAULT_PROP_DEVICE   "/dev/video0"
 #define DEFAULT_PROP_NUMJOBS  0
 #define DEFAULT_PROP_BGCOLOR  0
-#define DEFAULT_PROP_DESYNC_TRIGGER 50
+#define DEFAULT_PROP_RESYNC_TRIGGER -1
 
 #define PROP_BGMETHOD_MIN       0
 #define PROP_BGMETHOD_DISABLED  0
@@ -228,7 +228,7 @@ enum
   PROP_NUMJOBS,
   PROP_BGCOLOR,
   PROP_BGMETHOD,
-  PROP_DESYNC_TRIGGER,
+  PROP_RESYNC_TRIGGER,
 };
 
 static void
@@ -250,8 +250,8 @@ gst_v4l2_compositor_get_property (GObject * object,
     case PROP_BGMETHOD:
       g_value_set_int (value, self->background_method);
       break;
-    case PROP_DESYNC_TRIGGER:
-      g_value_set_uint (value, self->desync_trigger);
+    case PROP_RESYNC_TRIGGER:
+      g_value_set_int (value, self->resync_trigger);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -296,8 +296,8 @@ gst_v4l2_compositor_set_property (GObject * object,
     case PROP_BGMETHOD:
       self->background_method = g_value_get_int (value);
       break;
-    case PROP_DESYNC_TRIGGER:
-      self->desync_trigger = g_value_get_uint (value);
+    case PROP_RESYNC_TRIGGER:
+      self->resync_trigger = g_value_get_int (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -528,7 +528,7 @@ gst_v4l2_compositor_recycle_jobs (GstV4l2Compositor * self)
 
 
 static GstClockTimeDiff
-gst_v4l2_compositor_compute_desync (GstV4l2Compositor * self,
+gst_v4l2_compositor_compute_sync_delta (GstV4l2Compositor * self,
     GstClockTime * min_pts_p, GstClockTime * max_pts_p)
 {
   GstClockTime min_pts;
@@ -537,7 +537,7 @@ gst_v4l2_compositor_compute_desync (GstV4l2Compositor * self,
   GstV4l2CompositorJob *job;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
-  GstClockTimeDiff desync;
+  GstClockTimeDiff delta;
 
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
@@ -559,20 +559,20 @@ gst_v4l2_compositor_compute_desync (GstV4l2Compositor * self,
         max_pts = job->pts;
     }
   }
-  desync = GST_CLOCK_DIFF (min_pts, max_pts);
+  delta = GST_CLOCK_DIFF (min_pts, max_pts);
   goto end;
 
 time_none:
   min_pts = GST_CLOCK_TIME_NONE;
   max_pts = GST_CLOCK_TIME_NONE;
-  desync = GST_CLOCK_TIME_NONE;
+  delta = GST_CLOCK_TIME_NONE;
 
 end:
   if (min_pts_p != NULL)
     (*min_pts_p) = min_pts;
   if (max_pts_p != NULL)
     (*max_pts_p) = max_pts;
-  return desync;
+  return delta;
 }
 
 
@@ -591,12 +591,12 @@ gst_v4l2_compositor_dump_job_states (void)
   int idx;
   GstClockTime min_pts;
   GstClockTime max_pts;
-  GstClockTime desync;
+  GstClockTime delta;
   GstV4l2Compositor *self = gst_v4l2_compositor_instance;
 
   static const char chars[] = "RPQGBFC";
 
-  desync = gst_v4l2_compositor_compute_desync (self, &min_pts, &max_pts);
+  delta = gst_v4l2_compositor_compute_sync_delta (self, &min_pts, &max_pts);
 
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
     pad = it->data;
@@ -610,8 +610,8 @@ gst_v4l2_compositor_dump_job_states (void)
     }
     g_printf ("\n");
   }
-  g_printf ("* desync=%dms min_pts=%dms max_pts=%dms\n",
-      (int) GST_TIME_AS_MSECONDS (desync),
+  g_printf ("* delta=%dms min_pts=%dms max_pts=%dms\n",
+      (int) GST_TIME_AS_MSECONDS (delta),
       (int) GST_TIME_AS_MSECONDS (min_pts),
       (int) GST_TIME_AS_MSECONDS (max_pts));
   g_printf ("\n");
@@ -655,22 +655,25 @@ gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
 
 
 static gboolean
-gst_v4l2_compositor_synchronize_jobs (GstV4l2Compositor * self)
+gst_v4l2_compositor_resynchronize_jobs (GstV4l2Compositor * self)
 {
   GList *it;
   GstV4l2CompositorJob *job;
   GstV4l2VideoAggregatorPad *pad;
   GstV4l2CompositorPad *cpad;
-  GstClockTimeDiff desync;
+  GstClockTimeDiff delta;
   int num_dropped;
-  GstClockTimeDiff desync_trigger = self->desync_trigger * GST_MSECOND;
+  GstClockTimeDiff resync_trigger = self->resync_trigger * GST_MSECOND;
   GstClockTime min_pts;
   GstClockTime max_pts;
 
-  desync = gst_v4l2_compositor_compute_desync (self, &min_pts, &max_pts);
-  if (!GST_CLOCK_TIME_IS_VALID (desync))
+  if (self->resync_trigger < 0)
     return TRUE;
-  if (desync < desync_trigger)
+
+  delta = gst_v4l2_compositor_compute_sync_delta (self, &min_pts, &max_pts);
+  if (!GST_CLOCK_TIME_IS_VALID (delta))
+    return TRUE;
+  if (delta < resync_trigger)
     return TRUE;
 
   num_dropped = 0;
@@ -700,13 +703,13 @@ gst_v4l2_compositor_synchronize_jobs (GstV4l2Compositor * self)
 
   if (num_dropped > 0) {
     GST_WARNING_OBJECT (self,
-        "%d frame(s) dropped (desync=%dms)",
-        num_dropped, (int) GST_TIME_AS_MSECONDS (desync));
+        "%d frame(s) dropped (delta=%dms)",
+        num_dropped, (int) GST_TIME_AS_MSECONDS (delta));
 
     GST_OBJECT_UNLOCK (self);
     GST_ELEMENT_WARNING (self, CORE, CLOCK, (NULL),
-        ("%d frame(s) dropped (desync=%dms)",
-            num_dropped, (int) GST_TIME_AS_MSECONDS (desync)));
+        ("%d frame(s) dropped (delta=%dms)",
+            num_dropped, (int) GST_TIME_AS_MSECONDS (delta)));
     GST_OBJECT_LOCK (self);
   }
 
@@ -1100,9 +1103,9 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     gst_v4l2_compositor_dump_job_states ();
 #endif
 
-  ok = gst_v4l2_compositor_synchronize_jobs (self);
+  ok = gst_v4l2_compositor_resynchronize_jobs (self);
   if (!ok) {
-    GST_ERROR_OBJECT (self, "gst_v4l2_compositor_synchronize_jobs() failed");
+    GST_ERROR_OBJECT (self, "gst_v4l2_compositor_resynchronize_jobs() failed");
     goto failed;
   }
 
@@ -1529,7 +1532,7 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->prop_number_of_jobs = DEFAULT_PROP_NUMJOBS;
   self->background_color = DEFAULT_PROP_BGCOLOR;
   self->background_method = DEFAULT_PROP_BGMETHOD;
-  self->desync_trigger = DEFAULT_PROP_DESYNC_TRIGGER;
+  self->resync_trigger = DEFAULT_PROP_RESYNC_TRIGGER;
   self->soft_background_done = FALSE;
   self->get_output_buffer_count = 0;
 #ifdef GST_V4L2_COMPOSITOR_DEBUG
@@ -1606,8 +1609,8 @@ gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class)
           PROP_BGMETHOD_MIN, PROP_BGMETHOD_MAX, DEFAULT_PROP_BGMETHOD,
           G_PARAM_READWRITE));
 
-  g_object_class_install_property (gobject_class, PROP_DESYNC_TRIGGER,
-      g_param_spec_uint ("desync-trigger", "desync-trigger",
-          "(in milliseconds)", 0, G_MAXUINT, DEFAULT_PROP_DESYNC_TRIGGER,
-          G_PARAM_READWRITE));
+  g_object_class_install_property (gobject_class, PROP_RESYNC_TRIGGER,
+      g_param_spec_int ("resync-trigger", "resync-trigger",
+          "in milliseconds, negative number to desactivate resynchro.",
+          G_MININT, G_MAXINT, DEFAULT_PROP_RESYNC_TRIGGER, G_PARAM_READWRITE));
 }
