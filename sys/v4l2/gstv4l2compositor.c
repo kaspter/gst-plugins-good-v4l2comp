@@ -407,6 +407,7 @@ gst_v4l2_compositor_create_job (GstV4l2Compositor * self,
   job->external_sink_buf = NULL;
   job->cpad = cpad;
   job->state = GST_V4L2_COMPOSITOR_JOB_READY;
+  job->pts = GST_CLOCK_TIME_NONE;
 
   sink_buf = gst_v4l2_m2m_alloc_buffer (cpad->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
   if (sink_buf == NULL)
@@ -580,6 +581,7 @@ gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
     job->external_sink_buf = external_sink_buf;
     gst_buffer_ref (job->external_sink_buf);
     job->state = GST_V4L2_COMPOSITOR_JOB_PREPARED;
+    job->pts = GST_BUFFER_PTS (job->external_sink_buf);
   }
 
   return TRUE;
@@ -745,6 +747,7 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self,
       job->state = GST_V4L2_COMPOSITOR_JOB_GONE;
     else
       job->state = GST_V4L2_COMPOSITOR_JOB_READY;
+    job->pts = GST_CLOCK_TIME_NONE;
     job->master_job = NULL;
     cpad->queued_jobs = g_list_remove (cpad->queued_jobs, job);
   }

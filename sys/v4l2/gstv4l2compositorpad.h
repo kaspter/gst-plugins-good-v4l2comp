@@ -61,6 +61,7 @@ struct _GstV4l2CompositorJob
   GstBuffer *external_sink_buf;
   GstBuffer *source_buf;
   GstV4l2CompositorJobState state;
+  GstClockTime pts;
 };
 
 /**
