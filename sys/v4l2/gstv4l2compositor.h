@@ -59,6 +59,7 @@ struct _GstV4l2Compositor
   int background_method;
   gboolean soft_background_done;
   guint32 get_output_buffer_count;
+  guint desync_trigger;
 };
 
 struct _GstV4l2CompositorClass

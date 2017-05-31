@@ -211,6 +211,7 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
 #define DEFAULT_PROP_DEVICE   "/dev/video0"
 #define DEFAULT_PROP_NUMJOBS  0
 #define DEFAULT_PROP_BGCOLOR  0
+#define DEFAULT_PROP_DESYNC_TRIGGER 50
 
 #define PROP_BGMETHOD_MIN       0
 #define PROP_BGMETHOD_DISABLED  0
@@ -227,6 +228,7 @@ enum
   PROP_NUMJOBS,
   PROP_BGCOLOR,
   PROP_BGMETHOD,
+  PROP_DESYNC_TRIGGER,
 };
 
 static void
@@ -247,6 +249,9 @@ gst_v4l2_compositor_get_property (GObject * object,
       break;
     case PROP_BGMETHOD:
       g_value_set_int (value, self->background_method);
+      break;
+    case PROP_DESYNC_TRIGGER:
+      g_value_set_uint (value, self->desync_trigger);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -290,6 +295,9 @@ gst_v4l2_compositor_set_property (GObject * object,
       break;
     case PROP_BGMETHOD:
       self->background_method = g_value_get_int (value);
+      break;
+    case PROP_DESYNC_TRIGGER:
+      self->desync_trigger = g_value_get_uint (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -641,6 +649,67 @@ gst_v4l2_compositor_prepare_jobs (GstV4l2Compositor * self)
     job->state = GST_V4L2_COMPOSITOR_JOB_PREPARED;
     job->pts = GST_BUFFER_PTS (job->external_sink_buf);
   }
+
+  return TRUE;
+}
+
+
+static gboolean
+gst_v4l2_compositor_synchronize_jobs (GstV4l2Compositor * self)
+{
+  GList *it;
+  GstV4l2CompositorJob *job;
+  GstV4l2VideoAggregatorPad *pad;
+  GstV4l2CompositorPad *cpad;
+  GstClockTimeDiff desync;
+  int num_dropped;
+  GstClockTimeDiff desync_trigger = self->desync_trigger * GST_MSECOND;
+  GstClockTime min_pts;
+  GstClockTime max_pts;
+
+  desync = gst_v4l2_compositor_compute_desync (self, &min_pts, &max_pts);
+  if (!GST_CLOCK_TIME_IS_VALID (desync))
+    return TRUE;
+  if (desync < desync_trigger)
+    return TRUE;
+
+  num_dropped = 0;
+  for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
+    pad = it->data;
+    cpad = GST_V4L2_COMPOSITOR_PAD (pad);
+    for (;;) {
+      if (cpad->prepared_jobs == NULL)
+        break;
+      if (cpad->prepared_jobs->next == NULL)
+        break;
+      job = g_list_nth_data (cpad->prepared_jobs, 0);
+      if (!GST_CLOCK_TIME_IS_VALID (job->pts))
+        continue;
+      if (job->pts > max_pts)
+        break;
+      cpad->prepared_jobs = g_list_remove (cpad->prepared_jobs, job);
+      if (job->external_sink_buf) {
+        gst_buffer_unref (job->external_sink_buf);
+        job->external_sink_buf = NULL;
+      }
+      job->state = GST_V4L2_COMPOSITOR_JOB_READY;
+      job->pts = GST_CLOCK_TIME_NONE;
+      num_dropped++;
+    }
+  }
+
+  if (num_dropped > 0) {
+    GST_WARNING_OBJECT (self,
+        "%d frame(s) dropped (desync=%dms)",
+        num_dropped, (int) GST_TIME_AS_MSECONDS (desync));
+
+    GST_OBJECT_UNLOCK (self);
+    GST_ELEMENT_WARNING (self, CORE, CLOCK, (NULL),
+        ("%d frame(s) dropped (desync=%dms)",
+            num_dropped, (int) GST_TIME_AS_MSECONDS (desync)));
+    GST_OBJECT_LOCK (self);
+  }
+
 
   return TRUE;
 }
@@ -1030,6 +1099,12 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
   if ((self->get_output_buffer_count % 30) == 0)
     gst_v4l2_compositor_dump_job_states ();
 #endif
+
+  ok = gst_v4l2_compositor_synchronize_jobs (self);
+  if (!ok) {
+    GST_ERROR_OBJECT (self, "gst_v4l2_compositor_synchronize_jobs() failed");
+    goto failed;
+  }
 
   ok = gst_v4l2_compositor_queue_jobs (self);
   if (!ok) {
@@ -1454,6 +1529,7 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->prop_number_of_jobs = DEFAULT_PROP_NUMJOBS;
   self->background_color = DEFAULT_PROP_BGCOLOR;
   self->background_method = DEFAULT_PROP_BGMETHOD;
+  self->desync_trigger = DEFAULT_PROP_DESYNC_TRIGGER;
   self->soft_background_done = FALSE;
   self->get_output_buffer_count = 0;
 #ifdef GST_V4L2_COMPOSITOR_DEBUG
@@ -1528,5 +1604,10 @@ gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class)
   g_object_class_install_property (gobject_class, PROP_BGMETHOD,
       g_param_spec_int ("bgmethod", "bgmethod", "0: disabled, 1: driver",
           PROP_BGMETHOD_MIN, PROP_BGMETHOD_MAX, DEFAULT_PROP_BGMETHOD,
+          G_PARAM_READWRITE));
+
+  g_object_class_install_property (gobject_class, PROP_DESYNC_TRIGGER,
+      g_param_spec_uint ("desync-trigger", "desync-trigger",
+          "(in milliseconds)", 0, G_MAXUINT, DEFAULT_PROP_DESYNC_TRIGGER,
           G_PARAM_READWRITE));
 }
