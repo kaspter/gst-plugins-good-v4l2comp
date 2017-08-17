@@ -991,10 +991,13 @@ gst_v4l2_compositor_cleanup_jobs (GstV4l2Compositor * self)
 }
 
 static gboolean
-gst_v4l2_compositor_is_eos (GstV4l2Compositor * self)
+gst_v4l2_compositor_is_leaving (GstV4l2Compositor * self)
 {
   GList *it;
   GstV4l2VideoAggregatorPad *pad;
+
+  if (self->leaving)
+    return TRUE;
 
   /* do not process any buffers if EOS is called on a sink pad */
   for (it = GST_ELEMENT (self)->sinkpads; it; it = it->next) {
@@ -1002,6 +1005,7 @@ gst_v4l2_compositor_is_eos (GstV4l2Compositor * self)
 
     if (gst_v4l2_aggregator_pad_is_eos (GST_V4L2_AGGREGATOR_PAD (pad))) {
       GST_DEBUG_OBJECT (self, "EOS called, do not process any buffers");
+      self->leaving = TRUE;
       return TRUE;
     }
   }
@@ -1058,7 +1062,7 @@ static GstFlowReturn
 gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     GstBuffer ** outbuf_p)
 {
-  gboolean ok, is_eos;
+  gboolean ok, leaving;
   GstV4l2Compositor *self = GST_V4L2_COMPOSITOR (vagg);
   GstV4l2CompositorJob *outjob;
   GstBuffer *outbuf;
@@ -1070,8 +1074,8 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
 
   (*outbuf_p) = NULL;
 
-  is_eos = gst_v4l2_compositor_is_eos (self);
-  if (is_eos)
+  leaving = gst_v4l2_compositor_is_leaving (self);
+  if (leaving)
     goto eos;
 
   ok = gst_v4l2_compositor_ensure_jobs (self);
@@ -1428,6 +1432,8 @@ gst_v4l2_compositor_playing_to_paused (GstV4l2Compositor * self)
   GstPad *pad;
   GstV4l2CompositorPad *cpad;
 
+  self->leaving = TRUE;
+
   gst_v4l2_compositor_flush_jobs (self);
 
   /* streamoff M2Ms */
@@ -1535,6 +1541,7 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->resync_trigger = DEFAULT_PROP_RESYNC_TRIGGER;
   self->soft_background_done = FALSE;
   self->get_output_buffer_count = 0;
+  self->leaving = FALSE;
 #ifdef GST_V4L2_COMPOSITOR_DEBUG
   gst_v4l2_compositor_instance = self;
 #endif
