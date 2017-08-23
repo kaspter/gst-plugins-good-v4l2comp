@@ -711,6 +711,7 @@ gst_v4l2_compositor_resynchronize_jobs (GstV4l2Compositor * self)
         ("%d frame(s) dropped (delta=%dms)",
             num_dropped, (int) GST_TIME_AS_MSECONDS (delta)));
     GST_OBJECT_LOCK (self);
+    self->discont = TRUE;
   }
 
 
@@ -852,6 +853,13 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self,
       ok = gst_v4l2_m2m_dqbuf (job->cpad->m2m, job->source_buf);
       if (!ok) {
         GST_ERROR_OBJECT (self, "gst_v4l2_m2m_dqbuf() failed");
+        return FALSE;
+      }
+
+      ok = gst_buffer_copy_into (job->source_buf, job->sink_buf,
+          GST_BUFFER_COPY_FLAGS | GST_BUFFER_COPY_TIMESTAMPS, 0, -1);
+      if (!ok) {
+        GST_ERROR_OBJECT (self, "gst_buffer_copy_into() failed");
         return FALSE;
       }
 
@@ -1127,6 +1135,11 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
 
   if (outjob) {
     outbuf = outjob->source_buf;
+    if (self->discont) {
+      GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_DISCONT);
+      self->discont = FALSE;
+    }
+
     emeta = gst_v4l2_m2m_get_meta (outbuf);
     emeta->user_data = (gpointer) outjob;
     emeta->dispose = gst_v4l2_compositor_dispose_output_buffer;
@@ -1542,6 +1555,7 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->soft_background_done = FALSE;
   self->get_output_buffer_count = 0;
   self->leaving = FALSE;
+  self->discont = FALSE;
 #ifdef GST_V4L2_COMPOSITOR_DEBUG
   gst_v4l2_compositor_instance = self;
 #endif
