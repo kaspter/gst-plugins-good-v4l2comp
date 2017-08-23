@@ -855,6 +855,13 @@ gst_v4l2_compositor_dequeue_jobs (GstV4l2Compositor * self,
         return FALSE;
       }
 
+      ok = gst_buffer_copy_into (job->source_buf, job->sink_buf,
+          GST_BUFFER_COPY_FLAGS | GST_BUFFER_COPY_TIMESTAMPS, 0, -1);
+      if (!ok) {
+        GST_ERROR_OBJECT (self, "gst_buffer_copy_into() failed");
+        return FALSE;
+      }
+
       if (job->cpad != master_cpad) {
         ok = gst_v4l2_m2m_reset_buffer (job->cpad->m2m, job->source_buf);
         if (!ok) {
