@@ -81,6 +81,8 @@ struct _GstV4l2CompositorPad
   /* properties */
   gint xpos, ypos;
   gint width, height;
+  gint xcrop, ycrop;
+  gint width_crop, height_crop;
   gchar *videodev;
 };
 

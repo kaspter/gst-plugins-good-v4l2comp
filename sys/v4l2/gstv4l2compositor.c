@@ -52,10 +52,14 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink_%u",
     GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE (FORMATS))
     );
 
-#define DEFAULT_PAD_XPOS   0
-#define DEFAULT_PAD_YPOS   0
-#define DEFAULT_PAD_WIDTH  -1
-#define DEFAULT_PAD_HEIGHT -1
+#define DEFAULT_PAD_XPOS        0
+#define DEFAULT_PAD_YPOS        0
+#define DEFAULT_PAD_WIDTH       -1
+#define DEFAULT_PAD_HEIGHT      -1
+#define DEFAULT_PAD_XCROP       0
+#define DEFAULT_PAD_YCROP       0
+#define DEFAULT_PAD_WIDTH_CROP  -1
+#define DEFAULT_PAD_HEIGHT_CROP -1
 #define DEFAULT_PAD_DEVICE NULL
 enum
 {
@@ -64,6 +68,10 @@ enum
   PROP_PAD_YPOS,
   PROP_PAD_WIDTH,
   PROP_PAD_HEIGHT,
+  PROP_PAD_XCROP,
+  PROP_PAD_YCROP,
+  PROP_PAD_WIDTH_CROP,
+  PROP_PAD_HEIGHT_CROP,
   PROP_PAD_DEVICE,
 };
 
@@ -88,6 +96,18 @@ gst_v4l2_compositor_pad_get_property (GObject * object, guint prop_id,
       break;
     case PROP_PAD_HEIGHT:
       g_value_set_int (value, pad->height);
+      break;
+    case PROP_PAD_XCROP:
+      g_value_set_int (value, pad->xcrop);
+      break;
+    case PROP_PAD_YCROP:
+      g_value_set_int (value, pad->ycrop);
+      break;
+    case PROP_PAD_WIDTH_CROP:
+      g_value_set_int (value, pad->width_crop);
+      break;
+    case PROP_PAD_HEIGHT_CROP:
+      g_value_set_int (value, pad->height_crop);
       break;
     case PROP_PAD_DEVICE:
       g_value_set_string (value, pad->videodev);
@@ -116,6 +136,18 @@ gst_v4l2_compositor_pad_set_property (GObject * object, guint prop_id,
       break;
     case PROP_PAD_HEIGHT:
       pad->height = g_value_get_int (value);
+      break;
+    case PROP_PAD_XCROP:
+      pad->xcrop = g_value_get_int (value);
+      break;
+    case PROP_PAD_YCROP:
+      pad->ycrop = g_value_get_int (value);
+      break;
+    case PROP_PAD_WIDTH_CROP:
+      pad->width_crop = g_value_get_int (value);
+      break;
+    case PROP_PAD_HEIGHT_CROP:
+      pad->height_crop = g_value_get_int (value);
       break;
     case PROP_PAD_DEVICE:
       if (pad->videodev != NULL)
@@ -163,6 +195,10 @@ gst_v4l2_compositor_pad_init (GstV4l2CompositorPad * cpad)
   cpad->ypos = DEFAULT_PAD_YPOS;
   cpad->width = DEFAULT_PAD_WIDTH;
   cpad->height = DEFAULT_PAD_HEIGHT;
+  cpad->xcrop = DEFAULT_PAD_XCROP;
+  cpad->ycrop = DEFAULT_PAD_YCROP;
+  cpad->width_crop = DEFAULT_PAD_WIDTH_CROP;
+  cpad->height_crop = DEFAULT_PAD_HEIGHT_CROP;
   cpad->m2m = NULL;
   cpad->jobs = NULL;
   cpad->prepared_jobs = NULL;
@@ -197,6 +233,24 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
       g_param_spec_int ("height", "Height", "Height of the picture",
           G_MININT, G_MAXINT, DEFAULT_PAD_HEIGHT,
           G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_PAD_XCROP,
+      g_param_spec_int ("xcrop", "X Cropping", "X Position of the cropping window",
+          G_MININT, G_MAXINT, DEFAULT_PAD_XCROP,
+          G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_PAD_YCROP,
+      g_param_spec_int ("ycrop", "Y Cropping", "Y Position of the cropping window",
+          G_MININT, G_MAXINT, DEFAULT_PAD_YCROP,
+          G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_PAD_WIDTH_CROP,
+      g_param_spec_int ("width-crop", "Width Cropping", "Width of the cropping window",
+          G_MININT, G_MAXINT, DEFAULT_PAD_WIDTH_CROP,
+          G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_PAD_HEIGHT_CROP,
+      g_param_spec_int ("height-crop", "Height Cropping", "Height of the cropping window",
+          G_MININT, G_MAXINT, DEFAULT_PAD_HEIGHT_CROP,
+          G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS));
+
   g_object_class_install_property (gobject_class, PROP_PAD_DEVICE,
       g_param_spec_string ("device", "Device", "Device location",
           NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
@@ -328,6 +382,9 @@ gst_v4l2_compositor_get_compose_bounds (GstV4l2Compositor * self,
     bounds->height = info->height;
   else
     bounds->height = pad->height;
+
+  GST_INFO_OBJECT (self, "compose_bounds: left %d, top %d, width %d, height %d",
+    bounds->left, bounds->top, bounds->width, bounds->height);
 }
 
 static void
@@ -336,11 +393,22 @@ gst_v4l2_compositor_get_crop_bounds (GstV4l2Compositor * self,
 {
   GstVideoInfo *info;
 
+  bounds->left = pad->xcrop;
+  bounds->top = pad->ycrop;
+
   info = gst_v4l2_m2m_get_video_info (pad->m2m, GST_V4L2_M2M_BUFTYPE_SINK);
-  bounds->left = 0;
-  bounds->top = 0;
-  bounds->width = info->width;
-  bounds->height = info->height;
+  if (pad->width_crop == DEFAULT_PAD_WIDTH_CROP)
+    bounds->width = info->width - pad->xcrop;
+  else
+    bounds->width = pad->width_crop;
+
+  if (pad->height_crop == DEFAULT_PAD_HEIGHT_CROP)
+    bounds->height = info->height - pad->ycrop;
+  else
+    bounds->height = pad->height_crop;
+
+  GST_INFO_OBJECT (self, "crop_bounds: left %d, top %d, width %d, height %d",
+    bounds->left, bounds->top, bounds->width, bounds->height);
 }
 
 static GstV4l2CompositorPad *
