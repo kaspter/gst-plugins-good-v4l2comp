@@ -45,6 +45,8 @@ typedef struct _GstV4l2CompositorClass GstV4l2CompositorClass;
  * The opaque #GstV4l2Compositor structure.
  */
 
+typedef struct _GdkPixbuf GdkPixbuf;
+
 struct _GstV4l2Compositor
 {
   GstV4l2VideoAggregator videoaggregator;
@@ -56,8 +58,11 @@ struct _GstV4l2Compositor
   int number_of_jobs;
   int prop_number_of_jobs;
   guint32 background_color;
-  int background_method;
-  gboolean soft_background_done;
+  gchar * background_filename;
+  GstBuffer * background_buffer;
+  guint background_width;
+  guint background_height;
+  guint background_size;
   guint32 get_output_buffer_count;
   gint resync_trigger;
   gboolean leaving;
