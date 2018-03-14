@@ -30,6 +30,7 @@ libgstvideo4linux2_la_CFLAGS =   $(GST_PLUGINS_BASE_CFLAGS) \
 				 $(GST_CFLAGS) \
 				 $(X_CFLAGS) \
 				 $(LIBV4L2_CFLAGS) \
+                                 $(GDK_PIXBUF_CFLAGS) \
 				 $(GUDEV_CFLAGS)
 
 libgstvideo4linux2_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
@@ -40,6 +41,7 @@ libgstvideo4linux2_la_LIBADD =   $(GST_PLUGINS_BASE_LIBS) \
 				 $(GST_BASE_LIBS) \
 				 $(GST_LIBS) \
 				 $(LIBV4L2_LIBS) \
+                                 $(GDK_PIXBUF_LIBS) \
 				 $(GUDEV_LIBS) \
 				 $(LIBRT)
 

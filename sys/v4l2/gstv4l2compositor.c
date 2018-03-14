@@ -32,6 +32,7 @@
 #endif
 
 #include <string.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_v4l2compositor_debug);
 #define GST_CAT_DEFAULT gst_v4l2compositor_debug
@@ -210,24 +211,20 @@ gst_v4l2_compositor_pad_class_init (GstV4l2CompositorPadClass * klass)
 /* GstV4l2Compositor */
 #define DEFAULT_PROP_DEVICE   "/dev/video0"
 #define DEFAULT_PROP_NUMJOBS  0
-#define DEFAULT_PROP_BGCOLOR  0
+#define DEFAULT_PROP_BG_COLOR  0
 #define DEFAULT_PROP_RESYNC_TRIGGER -1
-
-#define PROP_BGMETHOD_MIN       0
-#define PROP_BGMETHOD_DISABLED  0
-#define PROP_BGMETHOD_DRIVER    1
-#define PROP_BGMETHOD_SOFT      2
-#define PROP_BGMETHOD_MAX       2
-
-#define DEFAULT_PROP_BGMETHOD  PROP_BGMETHOD_DISABLED
+#define DEFAULT_PROP_BG_WIDTH 0
+#define DEFAULT_PROP_BG_HEIGHT 0
 
 enum
 {
   PROP_0,
   PROP_DEVICE,
   PROP_NUMJOBS,
-  PROP_BGCOLOR,
-  PROP_BGMETHOD,
+  PROP_BG_COLOR,
+  PROP_BG_FILENAME,
+  PROP_BG_WIDTH,
+  PROP_BG_HEIGHT,
   PROP_RESYNC_TRIGGER,
 };
 
@@ -244,11 +241,17 @@ gst_v4l2_compositor_get_property (GObject * object,
     case PROP_NUMJOBS:
       g_value_set_int (value, self->prop_number_of_jobs);
       break;
-    case PROP_BGCOLOR:
+    case PROP_BG_COLOR:
       g_value_set_uint (value, self->background_color);
       break;
-    case PROP_BGMETHOD:
-      g_value_set_int (value, self->background_method);
+    case PROP_BG_FILENAME:
+      g_value_set_string (value, self->background_filename);
+      break;
+    case PROP_BG_HEIGHT:
+      g_value_set_uint (value, self->background_height);
+      break;
+    case PROP_BG_WIDTH:
+      g_value_set_uint (value, self->background_width);
       break;
     case PROP_RESYNC_TRIGGER:
       g_value_set_int (value, self->resync_trigger);
@@ -290,11 +293,18 @@ gst_v4l2_compositor_set_property (GObject * object,
     case PROP_NUMJOBS:
       self->prop_number_of_jobs = g_value_get_int (value);
       break;
-    case PROP_BGCOLOR:
+    case PROP_BG_COLOR:
       self->background_color = g_value_get_uint (value);
       break;
-    case PROP_BGMETHOD:
-      self->background_method = g_value_get_int (value);
+    case PROP_BG_FILENAME:
+      g_free (self->background_filename);
+      self->background_filename = g_value_dup_string (value);
+      break;
+    case PROP_BG_HEIGHT:
+      self->background_height = g_value_get_uint (value);
+      break;
+    case PROP_BG_WIDTH:
+      self->background_width = g_value_get_uint (value);
       break;
     case PROP_RESYNC_TRIGGER:
       self->resync_trigger = g_value_get_int (value);
@@ -1023,46 +1033,208 @@ gst_v4l2_compositor_is_leaving (GstV4l2Compositor * self)
 
 
 static gboolean
-gst_v4l2_compositor_process_soft_background (GstV4l2Compositor * self)
+gst_v4l2_compositor_load_background (GstV4l2Compositor * self)
 {
-  GstMapInfo mapinfo;
+  GstVideoInfo *in_info;
+  GdkPixbuf *in_pixbuf;
+  GstVideoFrame in_frame;
+  GstMapInfo in_map;
+  gboolean in_mapped;
+  guint in_width;
+  guint in_height;
+  GstVideoFormat in_format;
+  GstBuffer *in_buffer;
+  guchar *in_pixels;
+  gsize in_size;
+
+  GstVideoInfo *out_info;
+  GstVideoFrame out_frame;
+  GstBuffer *out_buffer;
+  gsize out_size;
+
+  gboolean ok;
+  guint dst_height;
+  guint dst_width;
+  GstVideoConverter *converter;
+  gboolean ret;
+  gint i;
+  GError *error;
+  const gchar *error_msg;
+
+  in_info = NULL;
+  in_pixbuf = NULL;
+  in_mapped = FALSE;
+  in_buffer = NULL;
+  in_pixels = NULL;
+  out_info = NULL;
+  out_buffer = NULL;
+  error = NULL;
+  error_msg = NULL;
+
+  /* output frame */
+  out_info = gst_video_info_new ();
+  ok = gst_video_info_from_caps (out_info, self->srccaps);
+  if (!ok)
+    goto end;
+  out_size = GST_VIDEO_INFO_SIZE (out_info);
+  out_buffer = gst_buffer_new_allocate (NULL, out_size, NULL);
+  if (!gst_video_frame_map (&out_frame, out_info, out_buffer, GST_MAP_WRITE))
+    goto end;
+
+  /* input frame */
+  if (self->background_filename) {
+    in_pixbuf = gdk_pixbuf_new_from_file (self->background_filename, &error);
+    if (!in_pixbuf) {
+      error_msg = error->message;
+      goto end;
+    }
+    in_width = gdk_pixbuf_get_width (in_pixbuf);
+    in_height = gdk_pixbuf_get_height (in_pixbuf);
+    if (gdk_pixbuf_get_has_alpha (in_pixbuf))
+      in_format = GST_VIDEO_FORMAT_RGBA;
+    else
+      in_format = GST_VIDEO_FORMAT_RGB;
+    in_size = gdk_pixbuf_get_byte_length (in_pixbuf);
+    in_buffer = gst_buffer_new_allocate (NULL, in_size, NULL);
+    ok = gst_buffer_map (in_buffer, &in_map, GST_MAP_WRITE);
+    if (!ok)
+      goto end;
+    in_mapped = TRUE;
+    in_pixels = in_map.data;
+    memcpy (in_pixels, gdk_pixbuf_get_pixels (in_pixbuf), in_size);
+  } else {
+    in_width = 4;
+    in_height = 4;
+    in_format = GST_VIDEO_FORMAT_RGB;
+    in_size = in_width * in_height * 3;
+    in_buffer = gst_buffer_new_allocate (NULL, in_size, NULL);
+    ok = gst_buffer_map (in_buffer, &in_map, GST_MAP_WRITE);
+    if (!ok)
+      goto end;
+    in_mapped = TRUE;
+    in_pixels = in_map.data;
+    for (i = 0; i < in_size; i += 3) {
+      in_pixels[i + 0] = (self->background_color >> 16) & 0xff;
+      in_pixels[i + 1] = (self->background_color >> 8) & 0xff;
+      in_pixels[i + 2] = (self->background_color >> 0) & 0xff;
+    }
+  }
+  in_info = gst_video_info_new ();
+  gst_video_info_set_format (in_info, in_format, in_width, in_height);
+  GST_VIDEO_INFO_INTERLACE_MODE (in_info) =
+      GST_VIDEO_INTERLACE_MODE_PROGRESSIVE;
+  GST_VIDEO_INFO_FPS_N (in_info) = GST_VIDEO_INFO_FPS_N (out_info);
+  GST_VIDEO_INFO_FPS_D (in_info) = GST_VIDEO_INFO_FPS_D (out_info);
+  if (!gst_video_frame_map (&in_frame, in_info, in_buffer, GST_MAP_READ))
+    goto end;
+
+  /* convertion */
+  if ((self->background_width > 0)
+      && (self->background_width < GST_VIDEO_INFO_WIDTH (out_info)))
+    dst_width = self->background_width;
+  else
+    dst_width = GST_VIDEO_INFO_WIDTH (out_info);
+  if ((self->background_height > 0)
+      && (self->background_height < GST_VIDEO_INFO_HEIGHT (out_info)))
+    dst_height = self->background_height;
+  else
+    dst_height = GST_VIDEO_INFO_HEIGHT (out_info);
+  converter = gst_video_converter_new (in_info, out_info,
+      gst_structure_new ("GstVideoConvertConfig",
+          GST_VIDEO_CONVERTER_OPT_SRC_X, G_TYPE_INT, 0,
+          GST_VIDEO_CONVERTER_OPT_SRC_Y, G_TYPE_INT, 0,
+          GST_VIDEO_CONVERTER_OPT_SRC_WIDTH, G_TYPE_INT, in_width,
+          GST_VIDEO_CONVERTER_OPT_SRC_HEIGHT, G_TYPE_INT, in_height,
+          GST_VIDEO_CONVERTER_OPT_DEST_X, G_TYPE_INT, 0,
+          GST_VIDEO_CONVERTER_OPT_DEST_Y, G_TYPE_INT, 0,
+          GST_VIDEO_CONVERTER_OPT_DEST_WIDTH, G_TYPE_INT, dst_width,
+          GST_VIDEO_CONVERTER_OPT_DEST_HEIGHT, G_TYPE_INT, dst_height, NULL));
+  gst_video_converter_frame (converter, &in_frame, &out_frame);
+  ret = TRUE;
+
+  /* update buffer */
+  if (self->background_buffer)
+    goto end;
+  self->background_buffer = out_buffer;
+  self->background_size = out_size;
+
+end:
+  if (error_msg)
+    GST_ERROR_OBJECT (self, error_msg);
+
+  if (in_info)
+    gst_video_info_free (in_info);
+
+  if (in_mapped)
+    gst_buffer_unmap (in_buffer, &in_map);
+
+  if (in_buffer)
+    gst_buffer_unref (in_buffer);
+
+  if (in_pixbuf)
+    g_object_unref (in_pixbuf);
+
+  if (out_info)
+    gst_video_info_free (out_info);
+
+  return ret;
+}
+
+
+static gboolean
+gst_v4l2_compositor_copy_background (GstV4l2Compositor * self)
+{
   gboolean ok;
   GstV4l2CompositorPad *master_cpad;
   GList *it;
   GstV4l2CompositorJob *job;
-  int count;
-  int boundary;
+  GstMapInfo map0, map;
+  gboolean mapped0, mapped;
+  gboolean ret;
 
-  if (self->background_method != PROP_BGMETHOD_SOFT)
+  if (!self->background_buffer)
     return TRUE;
 
-  if (self->soft_background_done)
-    return TRUE;
+  ret = FALSE;
+  mapped0 = FALSE;
+  mapped = FALSE;
+
+  ok = gst_buffer_map (self->background_buffer, &map0, GST_MAP_READ);
+  if (!ok)
+    goto end;
+  mapped0 = TRUE;
 
   master_cpad = gst_v4l2_compositor_get_master_pad (self);
-  count = 0;
   for (it = master_cpad->jobs; it; it = it->next) {
     job = it->data;
     if (job->state != GST_V4L2_COMPOSITOR_JOB_READY)
-      continue;
+      goto end;
 
-    ok = gst_buffer_map (job->source_buf, &mapinfo, GST_MAP_WRITE);
+    ok = gst_buffer_map (job->source_buf, &map, GST_MAP_WRITE);
     if (!ok)
-      return FALSE;
+      goto end;
+    mapped = TRUE;
 
-    /* FIXME:
-     * Currently self->background_color is ignored and black is forced.
-     * And this works only for NV12 */
-    boundary = mapinfo.size * 2 / 3.0;
-    memset (mapinfo.data, 0x0, boundary);
-    memset (mapinfo.data + boundary, 0x80, mapinfo.size - boundary);
+    memcpy (map.data, map0.data, self->background_size);
 
-    gst_buffer_unmap (job->source_buf, &mapinfo);
-    count++;
+    gst_buffer_unmap (job->source_buf, &map);
+    mapped = FALSE;
+  }
+  ret = TRUE;
+
+end:
+  if (mapped)
+    gst_buffer_unmap (job->source_buf, &map);
+
+  if (mapped0)
+    gst_buffer_unmap (self->background_buffer, &map0);
+
+  if (self->background_buffer) {
+    gst_buffer_unref (self->background_buffer);
+    self->background_buffer = NULL;
   }
 
-  self->soft_background_done = TRUE;
-  return TRUE;
+  return ret;
 }
 
 
@@ -1098,10 +1270,9 @@ gst_v4l2_compositor_get_output_buffer (GstV4l2VideoAggregator * vagg,
     goto failed;
   }
 
-  ok = gst_v4l2_compositor_process_soft_background (self);
+  ok = gst_v4l2_compositor_copy_background (self);
   if (!ok) {
-    GST_ERROR_OBJECT (self,
-        "gst_v4l2_compositor_process_soft_background() failed");
+    GST_ERROR_OBJECT (self, "gst_v4l2_compositor_copy_background() failed");
     goto failed;
   }
 
@@ -1230,6 +1401,9 @@ gst_v4l2_compositor_negotiated_caps (GstV4l2VideoAggregator * vagg,
     }
   }
 
+  ok = gst_v4l2_compositor_load_background (self);
+
+
   self->already_negotiated = TRUE;
   goto end;
 
@@ -1271,7 +1445,6 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
   GstV4l2CompositorPad *cpad;
   GstV4l2CompositorPad *master_cpad;
   int num;
-  gboolean ok;
 
   GST_DEBUG_OBJECT (self, "Opening");
 
@@ -1301,14 +1474,6 @@ gst_v4l2_compositor_open (GstV4l2Compositor * self)
       gst_v4l2_m2m_set_source_iomode (cpad->m2m, GST_V4L2_IO_DMABUF);
     } else {
       gst_v4l2_m2m_set_source_iomode (cpad->m2m, GST_V4L2_IO_DMABUF_IMPORT);
-    }
-  }
-
-  if (self->background_method == PROP_BGMETHOD_DRIVER) {
-    ok = gst_v4l2_m2m_set_background (master_cpad->m2m, self->background_color);
-    if (!ok) {
-      GST_ERROR_OBJECT (self, "could not set background color");
-      return FALSE;
     }
   }
 
@@ -1435,9 +1600,6 @@ gst_v4l2_compositor_sink_query (GstV4l2Aggregator * agg,
   }
 }
 
-
-
-
 static void
 gst_v4l2_compositor_playing_to_paused (GstV4l2Compositor * self)
 {
@@ -1549,10 +1711,12 @@ gst_v4l2_compositor_init (GstV4l2Compositor * self)
   self->number_of_sinkpads = -1;
   self->number_of_jobs = 0;
   self->prop_number_of_jobs = DEFAULT_PROP_NUMJOBS;
-  self->background_color = DEFAULT_PROP_BGCOLOR;
-  self->background_method = DEFAULT_PROP_BGMETHOD;
   self->resync_trigger = DEFAULT_PROP_RESYNC_TRIGGER;
-  self->soft_background_done = FALSE;
+  self->background_buffer = NULL;
+  self->background_filename = NULL;
+  self->background_color = DEFAULT_PROP_BG_COLOR;
+  self->background_width = DEFAULT_PROP_BG_WIDTH;
+  self->background_height = DEFAULT_PROP_BG_HEIGHT;
   self->get_output_buffer_count = 0;
   self->leaving = FALSE;
   self->discont = FALSE;
@@ -1621,14 +1785,22 @@ gst_v4l2_compositor_install_properties_helper (GObjectClass * gobject_class)
       g_param_spec_int ("num_jobs", "num_jobs", "num_jobs",
           0, G_MAXINT, DEFAULT_PROP_NUMJOBS, G_PARAM_READWRITE));
 
-  g_object_class_install_property (gobject_class, PROP_BGCOLOR,
-      g_param_spec_uint ("bgcolor", "bgcolor", "RGB color code",
-          0, G_MAXUINT, DEFAULT_PROP_BGCOLOR, G_PARAM_READWRITE));
+  g_object_class_install_property (gobject_class, PROP_BG_COLOR,
+      g_param_spec_uint ("bg-color", "bg-color", "RGB color code",
+          0x000000, 0xffffff, DEFAULT_PROP_BG_COLOR, G_PARAM_READWRITE));
 
-  g_object_class_install_property (gobject_class, PROP_BGMETHOD,
-      g_param_spec_int ("bgmethod", "bgmethod", "0: disabled, 1: driver",
-          PROP_BGMETHOD_MIN, PROP_BGMETHOD_MAX, DEFAULT_PROP_BGMETHOD,
-          G_PARAM_READWRITE));
+  g_object_class_install_property (gobject_class, PROP_BG_WIDTH,
+      g_param_spec_uint ("bg-width", "bg-width", "Background width",
+          0, 4000, DEFAULT_PROP_BG_WIDTH, G_PARAM_READWRITE));
+
+  g_object_class_install_property (gobject_class, PROP_BG_HEIGHT,
+      g_param_spec_uint ("bg-height", "bg-height", "Background height",
+          0, 4000, DEFAULT_PROP_BG_HEIGHT, G_PARAM_READWRITE));
+
+  g_object_class_install_property (gobject_class, PROP_BG_FILENAME,
+      g_param_spec_string ("bg-filename", "Background filename",
+          "Background filename (can be .JPG, .PNG, ...)",
+          NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class, PROP_RESYNC_TRIGGER,
       g_param_spec_int ("resync-trigger", "resync-trigger",
